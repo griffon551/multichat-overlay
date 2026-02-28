@@ -361,9 +361,11 @@ async function fetchKickChannelInfo() {
     }
 
     const data = await res.json();
+    const chatroomId = data?.chatroom?.id || null;
+    if (chatroomId) console.log(`[Kick] Channel ID: ${data?.id}, Chatroom ID: ${chatroomId}`);
     return {
-      chatroomId: data?.chatroom?.id || null,
-      pusherKey: data?.chatroom?.push_key || '32cbd69e4b950bf97679',
+      chatroomId,
+      pusherKey: '32cbd69e4b950bf97679',
       pusherCluster: 'us2',
     };
   } catch (err) {
