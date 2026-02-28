@@ -118,22 +118,25 @@ function connectTwitch() {
   });
 
   ws.on('message', (raw) => {
-    const data = raw.toString();
-    if (data.startsWith('PING')) { ws.send('PONG :tmi.twitch.tv'); return; }
-    if (data.includes('NOTICE * :Login authentication failed')) {
-      console.log('[Twitch] Auth failed, attempting token refresh...');
-      ws.close();
-      return;
+    // Twitch can send multiple IRC lines in one WebSocket message
+    const lines = raw.toString().split('\r\n').filter(Boolean);
+    for (const data of lines) {
+      if (data.startsWith('PING')) { ws.send('PONG :tmi.twitch.tv'); continue; }
+      if (data.includes('NOTICE * :Login authentication failed')) {
+        console.log('[Twitch] Auth failed, attempting token refresh...');
+        ws.close();
+        return;
+      }
+      const tagMatch = data.match(/^@([^ ]+) :([^!]+)![^ ]+ PRIVMSG #\S+ :(.+)$/);
+      if (!tagMatch) continue;
+      const tags = {};
+      tagMatch[1].split(';').forEach(t => { const [k, v] = t.split('='); tags[k] = v; });
+      const username = tags['display-name'] || tagMatch[2];
+      const message = tagMatch[3].trim();
+      const color = tags['color'] || null;
+      const badges = tags['badges'] ? tags['badges'].split(',').map(b => b.split('/')[0]) : [];
+      broadcast('twitch', username, message, color, badges);
     }
-    const tagMatch = data.match(/^@([^ ]+) :([^!]+)![^ ]+ PRIVMSG #\S+ :(.+)$/);
-    if (!tagMatch) return;
-    const tags = {};
-    tagMatch[1].split(';').forEach(t => { const [k, v] = t.split('='); tags[k] = v; });
-    const username = tags['display-name'] || tagMatch[2];
-    const message = tagMatch[3].trim();
-    const color = tags['color'] || null;
-    const badges = tags['badges'] ? tags['badges'].split(',').map(b => b.split('/')[0]) : [];
-    broadcast('twitch', username, message, color, badges);
   });
 
   ws.on('close', async () => {
@@ -360,7 +363,7 @@ async function fetchKickChannelInfo() {
     const data = await res.json();
     return {
       chatroomId: data?.chatroom?.id || null,
-      pusherKey: data?.chatroom?.push_key || 'eb1d5f283081a78b932c',
+      pusherKey: data?.chatroom?.push_key || '32cbd69e4b950bf97679',
       pusherCluster: 'us2',
     };
   } catch (err) {
@@ -373,7 +376,7 @@ async function connectKick() {
   if (!config.kick.enabled) return console.log('[Kick] Disabled - missing KICK_CHANNEL_NAME');
 
   let chatroomId = config.kick.chatroomId;
-  let pusherKey = 'eb1d5f283081a78b932c';
+  let pusherKey = '32cbd69e4b950bf97679';
 
   if (!chatroomId) {
     console.log('[Kick] Fetching channel info...');
@@ -393,7 +396,7 @@ async function connectKick() {
 
 function connectKickWebSocket(chatroomId, pusherKey) {
   // Kick's WebSocket — connect to their Pusher-compatible endpoint
-  const wsUrl = `wss://ws-us2.pusher.com/app/${pusherKey}?protocol=7&client=js&version=7.4.0&flash=false`;
+  const wsUrl = `wss://ws-us2.pusher.com/app/${pusherKey}?protocol=7&client=js&version=8.4.0-rc2&flash=false`;
   const ws = new WebSocket(wsUrl, {
     headers: {
       'Origin': 'https://kick.com',
