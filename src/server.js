@@ -323,11 +323,17 @@ function connectYoutube() {
       const data = await res.json();
       if (data.error) {
         console.error('[YouTube] API Error:', data.error.message);
-        // If the live chat is no longer valid (stream ended), reset and search again
+        // If the live chat is no longer valid (stream ended), reset and wait
         if (data.error.code === 403 || data.error.code === 404) {
-          console.log('[YouTube] Live chat ended, will search for next stream...');
+          console.log('[YouTube] Live chat ended, waiting for next stream...');
           liveChatId = null;
           nextPageToken = null;
+        }
+        // If quota exceeded, back off for 1 hour
+        if (data.error.code === 403 && data.error.message && data.error.message.includes('quota')) {
+          console.log('[YouTube] Quota exceeded, backing off for 1 hour...');
+          setTimeout(pollMessages, 3600000);
+          return;
         }
         setTimeout(pollMessages, 60000);
         return;
@@ -346,7 +352,8 @@ function connectYoutube() {
         if (author.isChatSponsor) badges.push('member');
         broadcast('youtube', author.displayName, text, null, badges);
       }
-      const pollIn = Math.max(data.pollingIntervalMillis || config.youtube.pollInterval, 2000);
+      // Respect YouTube's requested interval, minimum 30s to preserve quota
+      const pollIn = Math.max(data.pollingIntervalMillis || config.youtube.pollInterval, 30000);
       setTimeout(pollMessages, pollIn);
     } catch (err) {
       console.error('[YouTube] Error:', err.message);
