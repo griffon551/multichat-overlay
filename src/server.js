@@ -24,9 +24,10 @@ const config = {
     botUsername: process.env.TWITCH_BOT_USERNAME || null,
   },
   youtube: {
-    enabled: !!(process.env.YOUTUBE_API_KEY && process.env.YOUTUBE_LIVE_VIDEO_ID),
+    enabled: !!(process.env.YOUTUBE_API_KEY && (process.env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_LIVE_VIDEO_ID)),
     apiKey: process.env.YOUTUBE_API_KEY,
-    videoId: process.env.YOUTUBE_LIVE_VIDEO_ID,
+    channelId: process.env.YOUTUBE_CHANNEL_ID || null,   // preferred — auto-detects live stream
+    videoId: process.env.YOUTUBE_LIVE_VIDEO_ID || null,  // optional override for a specific stream
     pollInterval: parseInt(process.env.YOUTUBE_POLL_INTERVAL_MS || '5000'),
   },
   kick: {
@@ -277,11 +278,32 @@ function connectYoutube() {
   let nextPageToken = null;
   const seenIds = new Set();
 
+  // If a specific video ID is set, use it directly.
+  // Otherwise search the channel for an active live stream.
   async function getLiveChatId() {
-    const url = `https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${config.youtube.videoId}&key=${config.youtube.apiKey}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    return data.items?.[0]?.liveStreamingDetails?.activeLiveChatId;
+    if (config.youtube.videoId) {
+      // Direct video ID lookup
+      const url = `https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${config.youtube.videoId}&key=${config.youtube.apiKey}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      return data.items?.[0]?.liveStreamingDetails?.activeLiveChatId || null;
+    } else {
+      // Auto-detect active live stream from channel
+      const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${config.youtube.channelId}&eventType=live&type=video&key=${config.youtube.apiKey}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.error) {
+        console.error('[YouTube] Search API error:', data.error.message);
+        return null;
+      }
+      const videoId = data.items?.[0]?.id?.videoId;
+      if (!videoId) return null;
+      console.log('[YouTube] Found live stream video ID:', videoId);
+      // Now get the live chat ID from the video
+      const vRes = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${videoId}&key=${config.youtube.apiKey}`);
+      const vData = await vRes.json();
+      return vData.items?.[0]?.liveStreamingDetails?.activeLiveChatId || null;
+    }
   }
 
   async function pollMessages() {
@@ -289,8 +311,8 @@ function connectYoutube() {
       if (!liveChatId) {
         liveChatId = await getLiveChatId();
         if (!liveChatId) {
-          console.log('[YouTube] No active live chat found, retrying in 30s...');
-          setTimeout(pollMessages, 30000);
+          console.log('[YouTube] No active live stream found, retrying in 60s...');
+          setTimeout(pollMessages, 60000);
           return;
         }
         console.log('[YouTube] Connected to live chat:', liveChatId);
@@ -301,7 +323,13 @@ function connectYoutube() {
       const data = await res.json();
       if (data.error) {
         console.error('[YouTube] API Error:', data.error.message);
-        setTimeout(pollMessages, 30000);
+        // If the live chat is no longer valid (stream ended), reset and search again
+        if (data.error.code === 403 || data.error.code === 404) {
+          console.log('[YouTube] Live chat ended, will search for next stream...');
+          liveChatId = null;
+          nextPageToken = null;
+        }
+        setTimeout(pollMessages, 60000);
         return;
       }
       nextPageToken = data.nextPageToken;
