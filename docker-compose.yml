@@ -39,8 +39,6 @@ services:
       # If auto-fetch fails, set KICK_CHATROOM_ID manually
       KICK_CHANNEL_NAME: ""
       KICK_CHATROOM_ID: ""
-      KICK_PUSHER_KEY: "eb1d5f283081a78b932c"
-      KICK_PUSHER_CLUSTER: "us2"
 
       # ── JOYSTICK.TV ─────────────────────────────────────────────────────────
       # 1. Go to joystick.tv and create a bot application
