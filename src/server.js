@@ -30,18 +30,16 @@ const config = {
     pollInterval: parseInt(process.env.YOUTUBE_POLL_INTERVAL_MS || '5000'),
   },
   kick: {
-    enabled: !!(process.env.KICK_CHANNEL_NAME && process.env.KICK_PUSHER_KEY),
+    enabled: !!(process.env.KICK_CHANNEL_NAME),
     channelName: process.env.KICK_CHANNEL_NAME,
-    pusherKey: process.env.KICK_PUSHER_KEY || 'eb1d5f283081a78b932c',
-    pusherCluster: process.env.KICK_PUSHER_CLUSTER || 'us2',
-    chatroomId: process.env.KICK_CHATROOM_ID,
+    chatroomId: process.env.KICK_CHATROOM_ID || null,
   },
   joystick: {
     enabled: !!(process.env.JOYSTICK_CLIENT_ID && process.env.JOYSTICK_CLIENT_SECRET),
     clientId: process.env.JOYSTICK_CLIENT_ID,
     clientSecret: process.env.JOYSTICK_CLIENT_SECRET,
-    accessToken: process.env.JOYSTICK_ACCESS_TOKEN,
-    refreshToken: process.env.JOYSTICK_REFRESH_TOKEN,
+    accessToken: process.env.JOYSTICK_ACCESS_TOKEN || null,
+    refreshToken: process.env.JOYSTICK_REFRESH_TOKEN || null,
   },
 };
 
@@ -223,21 +221,16 @@ function connectYoutube() {
         }
         console.log('[YouTube] Connected to live chat:', liveChatId);
       }
-
       let url = `https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${liveChatId}&part=snippet,authorDetails&key=${config.youtube.apiKey}`;
       if (nextPageToken) url += `&pageToken=${nextPageToken}`;
-
       const res = await fetch(url);
       const data = await res.json();
-
       if (data.error) {
         console.error('[YouTube] API Error:', data.error.message);
         setTimeout(pollMessages, 30000);
         return;
       }
-
       nextPageToken = data.nextPageToken;
-
       for (const item of (data.items || [])) {
         if (seenIds.has(item.id)) continue;
         seenIds.add(item.id);
@@ -251,7 +244,6 @@ function connectYoutube() {
         if (author.isChatSponsor) badges.push('member');
         broadcast('youtube', author.displayName, text, null, badges);
       }
-
       const pollIn = Math.max(data.pollingIntervalMillis || config.youtube.pollInterval, 2000);
       setTimeout(pollMessages, pollIn);
     } catch (err) {
@@ -264,52 +256,94 @@ function connectYoutube() {
 }
 
 // ─── KICK ────────────────────────────────────────────────────────────────────
-function connectKick() {
-  if (!config.kick.enabled) return console.log('[Kick] Disabled - missing env vars');
-
-  const pusherKey = config.kick.pusherKey;
-  const cluster = config.kick.pusherCluster;
-  const chatroomId = config.kick.chatroomId;
-
-  if (!chatroomId) {
-    fetchKickChatroomId().then(id => {
-      if (id) connectKickPusher(pusherKey, cluster, id);
-      else console.error('[Kick] Could not get chatroom ID');
-    });
-  } else {
-    connectKickPusher(pusherKey, cluster, chatroomId);
-  }
-}
-
-async function fetchKickChatroomId() {
+// Kick uses their own WebSocket endpoint (not Pusher directly)
+async function fetchKickChannelInfo() {
   try {
-    const channelName = config.kick.channelName;
-    const res = await fetch(`https://kick.com/api/v2/channels/${channelName}`, {
-      headers: { 'Accept': 'application/json', 'User-Agent': 'MultiChat/1.0' }
+    const res = await fetch(`https://kick.com/api/v2/channels/${config.kick.channelName}`, {
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      }
     });
     const data = await res.json();
-    const id = data?.chatroom?.id;
-    if (id) console.log(`[Kick] Got chatroom ID: ${id}`);
-    return id;
+    return {
+      chatroomId: data?.chatroom?.id || null,
+      pusherKey: data?.chatroom?.push_key || 'eb1d5f283081a78b932c',
+      pusherCluster: 'us2',
+    };
   } catch (err) {
-    console.error('[Kick] Failed to fetch chatroom ID:', err.message);
+    console.error('[Kick] Failed to fetch channel info:', err.message);
     return null;
   }
 }
 
-function connectKickPusher(pusherKey, cluster, chatroomId) {
-  const pusherUrl = `wss://ws-${cluster}.pusher.com/app/${pusherKey}?protocol=7&client=js&version=7.6.0&flash=false`;
-  const ws = new WebSocket(pusherUrl);
+async function connectKick() {
+  if (!config.kick.enabled) return console.log('[Kick] Disabled - missing KICK_CHANNEL_NAME');
+
+  let chatroomId = config.kick.chatroomId;
+  let pusherKey = 'eb1d5f283081a78b932c';
+
+  if (!chatroomId) {
+    console.log('[Kick] Fetching channel info...');
+    const info = await fetchKickChannelInfo();
+    if (!info || !info.chatroomId) {
+      console.error('[Kick] Could not get chatroom ID, retrying in 30s...');
+      setTimeout(connectKick, 30000);
+      return;
+    }
+    chatroomId = info.chatroomId;
+    pusherKey = info.pusherKey;
+    console.log(`[Kick] Got chatroom ID: ${chatroomId}`);
+  }
+
+  connectKickWebSocket(chatroomId, pusherKey);
+}
+
+function connectKickWebSocket(chatroomId, pusherKey) {
+  // Kick's WebSocket — connect to their Pusher-compatible endpoint
+  const wsUrl = `wss://ws-us2.pusher.com/app/${pusherKey}?protocol=7&client=js&version=7.4.0&flash=false`;
+  const ws = new WebSocket(wsUrl, {
+    headers: {
+      'Origin': 'https://kick.com',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    }
+  });
+
+  let pingInterval = null;
 
   ws.on('open', () => {
-    console.log(`[Kick] Pusher connected, joining chatroom ${chatroomId}`);
-    ws.send(JSON.stringify({ event: 'pusher:subscribe', data: { auth: '', channel: `chatrooms.${chatroomId}.v2` } }));
+    console.log(`[Kick] WebSocket connected, subscribing to chatroom ${chatroomId}`);
+    ws.send(JSON.stringify({
+      event: 'pusher:subscribe',
+      data: { auth: '', channel: `chatrooms.${chatroomId}.v2` }
+    }));
+
+    // Keep-alive ping every 30s
+    pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ event: 'pusher:ping', data: {} }));
+      }
+    }, 30000);
   });
 
   ws.on('message', (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
-      if (msg.event === 'pusher:ping') { ws.send(JSON.stringify({ event: 'pusher:pong', data: {} })); return; }
+
+      if (msg.event === 'pusher:connection_established') {
+        console.log('[Kick] Connection established');
+        return;
+      }
+      if (msg.event === 'pusher:pong' || msg.event === 'pusher:ping') return;
+      if (msg.event === 'pusher_internal:subscription_succeeded') {
+        console.log('[Kick] Successfully subscribed to chatroom');
+        return;
+      }
+      if (msg.event === 'pusher:error') {
+        console.error('[Kick] Pusher error:', msg.data);
+        return;
+      }
+
       if (msg.event === 'App\\Events\\ChatMessageEvent') {
         const data = typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data;
         const username = data?.sender?.username || data?.sender?.slug || 'Unknown';
@@ -321,12 +355,15 @@ function connectKickPusher(pusherKey, cluster, chatroomId) {
     } catch (e) { /* ignore parse errors */ }
   });
 
-  ws.on('close', () => {
-    console.log('[Kick] Disconnected, reconnecting in 5s...');
-    setTimeout(() => connectKickPusher(pusherKey, cluster, chatroomId), 5000);
+  ws.on('close', (code, reason) => {
+    if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
+    console.log(`[Kick] Disconnected (${code}), reconnecting in 10s...`);
+    setTimeout(() => connectKickWebSocket(chatroomId, pusherKey), 10000);
   });
 
-  ws.on('error', (err) => console.error('[Kick] Error:', err.message));
+  ws.on('error', (err) => {
+    console.error('[Kick] WebSocket error:', err.message);
+  });
 }
 
 // ─── JOYSTICK ────────────────────────────────────────────────────────────────
@@ -385,6 +422,7 @@ function connectJoystick() {
       const msg = JSON.parse(raw.toString());
       if (msg.type === 'ping') return;
       if (msg.type === 'confirm_subscription') { console.log('[Joystick] Subscribed to GatewayChannel'); return; }
+      if (msg.type === 'reject_subscription') { console.error('[Joystick] Subscription rejected — check credentials'); return; }
       const payload = msg.message;
       if (!payload) return;
       if (payload.event === 'ChatMessage' && payload.type === 'new_message') {
@@ -445,7 +483,7 @@ JOYSTICK_REFRESH_TOKEN=${data.refresh_token}
       `);
       connectJoystick();
     } else {
-      res.send('Error: ' + JSON.stringify(data));
+      res.send('<h2>❌ Authorization failed</h2><pre>' + JSON.stringify(data, null, 2) + '</pre>');
     }
   } catch (err) {
     res.send('Error: ' + err.message);
