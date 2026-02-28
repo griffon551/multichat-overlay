@@ -63,9 +63,10 @@ Only fill in the platforms you use — unused platforms are simply skipped.
 1. Go to https://console.cloud.google.com
 2. Create a project → Enable **YouTube Data API v3**
 3. Create an API Key → `YOUTUBE_API_KEY`
-4. When you go live, grab the video ID from your stream URL (`?v=XXXXXXXXX`) → `YOUTUBE_LIVE_VIDEO_ID`
+4. Find your YouTube Channel ID at https://www.youtube.com/account_advanced → `YOUTUBE_CHANNEL_ID`
+5. That's it — the app will automatically detect when you go live and connect to your chat
 
-> ⚠️ YouTube requires a new video ID each stream. You'll need to update this env var and restart the container each time you go live. Alternatively, use a YouTube Scheduler to get a persistent stream key and video ID.
+> ℹ️ `YOUTUBE_LIVE_VIDEO_ID` is optional. Leave it blank to use auto-detection. You only need it if you want to force a specific stream.
 
 ### Kick
 1. Set `KICK_CHANNEL_NAME` to your Kick channel name — no other credentials needed
@@ -149,7 +150,9 @@ Visit `http://YOUR_TRUENAS_IP:3000/status` to see which platforms are connected:
 
 **YouTube not showing chat**
 - YouTube chat only works during an active live stream
-- Make sure the video ID matches the current stream, not a VOD
+- The app checks for a live stream every 60s — it will connect automatically once you go live
+- Make sure `YOUTUBE_CHANNEL_ID` is set correctly (find it at youtube.com/account_advanced)
+- If you set `YOUTUBE_LIVE_VIDEO_ID` as an override, make sure it matches the current stream and not a VOD
 
 **Kick not connecting**
 - Check the logs — it will say "Successfully subscribed to chatroom" if working, or log a Pusher error if not
