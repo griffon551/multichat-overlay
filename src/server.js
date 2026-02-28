@@ -261,10 +261,31 @@ async function fetchKickChannelInfo() {
   try {
     const res = await fetch(`https://kick.com/api/v2/channels/${config.kick.channelName}`, {
       headers: {
-        'Accept': 'application/json',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://kick.com/',
+        'Origin': 'https://kick.com',
+        'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
       }
     });
+
+    if (!res.ok) {
+      console.error(`[Kick] API returned ${res.status} ${res.statusText}`);
+      // If blocked, suggest setting KICK_CHATROOM_ID manually
+      if (res.status === 403 || res.status === 401 || res.status === 429) {
+        console.error('[Kick] Access denied by Kick API. Set KICK_CHATROOM_ID manually in your env vars.');
+        console.error(`[Kick] Find your chatroom ID at: https://kick.com/api/v2/channels/${config.kick.channelName}`);
+      }
+      return null;
+    }
+
     const data = await res.json();
     return {
       chatroomId: data?.chatroom?.id || null,
