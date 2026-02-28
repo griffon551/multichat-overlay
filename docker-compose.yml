@@ -14,13 +14,15 @@ services:
 
       # ── TWITCH ──────────────────────────────────────────────────────────────
       # 1. Go to https://dev.twitch.tv/console and create an application
-      # 2. Set OAuth Redirect URL to: http://YOUR_TRUENAS_IP:3000/twitch/callback
-      # 3. Fill in Client ID and Secret, leave token fields blank
-      # 4. Deploy, then visit http://YOUR_TRUENAS_IP:3000/twitch/auth to authorize
+      # 2. Set OAuth Redirect URL to: http://localhost:3000/twitch/callback
+      #    (Twitch requires HTTPS for non-localhost URLs, so use localhost)
+      # 3. Fill in Client ID and Secret below, set TWITCH_REDIRECT_URL, leave token fields blank
+      # 4. Deploy, then visit http://YOUR_TRUENAS_IP:3000/twitch/manual for setup instructions
       # 5. Copy the tokens shown into the fields below and restart
       TWITCH_CHANNEL: ""
       TWITCH_CLIENT_ID: ""
       TWITCH_CLIENT_SECRET: ""
+      TWITCH_REDIRECT_URL: "http://localhost:3000/twitch/callback"
       TWITCH_ACCESS_TOKEN: ""
       TWITCH_REFRESH_TOKEN: ""
       TWITCH_BOT_USERNAME: ""
@@ -50,3 +52,7 @@ services:
       JOYSTICK_CLIENT_SECRET: ""
       JOYSTICK_ACCESS_TOKEN: ""
       JOYSTICK_REFRESH_TOKEN: ""
+
+    # Uncomment to persist logs to a TrueNAS dataset
+    # volumes:
+    #   - /mnt/pool/multichat/logs:/app/logs
