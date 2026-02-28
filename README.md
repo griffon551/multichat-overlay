@@ -65,11 +65,11 @@ Only fill in the platforms you use — unused platforms are simply skipped.
 > ⚠️ YouTube requires a new video ID each stream. You'll need to update this env var and restart the container each time you go live. Alternatively, use a YouTube Scheduler to get a persistent stream key and video ID.
 
 ### Kick
-1. Set `KICK_CHANNEL_NAME` to your Kick channel name
-2. The app will auto-detect your chatroom ID
-3. If auto-detection fails, find your chatroom ID by visiting:
+1. Set `KICK_CHANNEL_NAME` to your Kick channel name — no other credentials needed
+2. The app fetches your chatroom ID and Pusher key automatically from Kick's API on startup
+3. If auto-detection fails, find your chatroom ID manually by visiting:
    `https://kick.com/api/v2/channels/YOUR_CHANNEL_NAME`
-   Look for `chatroom.id` in the JSON response
+   Look for `chatroom.id` in the JSON response, then set it as `KICK_CHATROOM_ID`
 
 ### Joystick.tv *(OAuth required — one-time setup)*
 1. Log into Joystick.tv and go to **Settings → Bot Applications**
@@ -148,8 +148,9 @@ Visit `http://YOUR_TRUENAS_IP:3000/status` to see which platforms are connected:
 - Make sure the video ID matches the current stream, not a VOD
 
 **Kick not connecting**
-- Try setting `KICK_CHATROOM_ID` manually (see Kick section above)
-- Kick's API occasionally changes — check container logs
+- Check the logs — it will say "Successfully subscribed to chatroom" if working, or log a Pusher error if not
+- If auto-detection of the chatroom ID fails, set `KICK_CHATROOM_ID` manually (see Kick section above)
+- If it connects then immediately disconnects in a loop, Kick may have changed their API — check for a newer version of this project
 
 **Joystick not connecting**
 - Make sure you completed the OAuth flow at `/joystick/auth`
