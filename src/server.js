@@ -441,6 +441,11 @@ function connectKickWebSocket(chatroomId, pusherKey) {
         return;
       }
 
+      // Temporary: log every event to diagnose Kick messages
+      if (msg.event && !['pusher:connection_established','pusher:pong','pusher:ping','pusher_internal:subscription_succeeded'].includes(msg.event)) {
+        console.log('[Kick] RAW event:', JSON.stringify(msg).substring(0, 300));
+      }
+
       if (msg.event === 'App\\Events\\ChatMessageSentEvent') {
         const data = typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data;
         // New structure: data.message.content, data.user.username
