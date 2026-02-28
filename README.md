@@ -45,15 +45,18 @@ Only fill in the platforms you use — unused platforms are simply skipped.
 ## 🔑 Getting API Credentials
 
 ### Twitch *(OAuth required — one-time setup)*
+
+> ⚠️ Twitch requires HTTPS for OAuth redirect URLs, except for `localhost`. Since TrueNAS is on a local IP, we use a `localhost` redirect and a manual copy-paste step.
+
 1. Go to [dev.twitch.tv/console](https://dev.twitch.tv/console) and click **Register Your Application**
 2. Give it any name (e.g. `My MultiChat`), set Category to **Chat Bot**
-3. Set the **OAuth Redirect URL** to: `http://YOUR_TRUENAS_IP:3000/twitch/callback`
+3. Set the **OAuth Redirect URL** to: `http://localhost:3000/twitch/callback`
 4. Click **Create**, then copy the **Client ID** and generate a **Client Secret**
-5. Add those to `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET` in Dockge, along with your `TWITCH_CHANNEL`
-6. Deploy the stack, then visit: `http://YOUR_TRUENAS_IP:3000/twitch/auth`
-7. Authorize the app on Twitch
-8. Copy the `TWITCH_ACCESS_TOKEN`, `TWITCH_REFRESH_TOKEN`, and `TWITCH_BOT_USERNAME` from the page shown
-9. Update those env vars in Dockge and restart the stack
+5. Add `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `TWITCH_CHANNEL`, and `TWITCH_REDIRECT_URL=http://localhost:3000/twitch/callback` to your Dockge env vars
+6. Deploy the stack, then visit: `http://YOUR_TRUENAS_IP:3000/twitch/manual`
+7. Follow the on-screen instructions — you'll click a link, Twitch will authorize, then your browser will try to redirect to `localhost:3000` (which won't load)
+8. Copy the full URL from your browser's address bar and paste it into the form on the manual page
+9. Copy the `TWITCH_ACCESS_TOKEN`, `TWITCH_REFRESH_TOKEN`, and `TWITCH_BOT_USERNAME` shown into your Dockge env vars and restart
 10. Tokens auto-refresh after that — no further manual steps needed
 
 ### YouTube
@@ -139,9 +142,10 @@ Visit `http://YOUR_TRUENAS_IP:3000/status` to see which platforms are connected:
 ## 🐛 Troubleshooting
 
 **Twitch not connecting**
-- Make sure you completed the OAuth flow at `/twitch/auth`
-- Check that your redirect URL in the Twitch dev console exactly matches `http://YOUR_TRUENAS_IP:3000/twitch/callback`
-- If your token expired and auto-refresh failed, re-run the auth flow at `/twitch/auth`
+- Make sure you completed the OAuth flow via `http://YOUR_TRUENAS_IP:3000/twitch/manual`
+- Check that your redirect URL in the Twitch dev console exactly matches `http://localhost:3000/twitch/callback`
+- Make sure `TWITCH_REDIRECT_URL` in Dockge is also set to `http://localhost:3000/twitch/callback`
+- If your token expired and auto-refresh failed, re-run the auth flow at `/twitch/manual`
 
 **YouTube not showing chat**
 - YouTube chat only works during an active live stream
