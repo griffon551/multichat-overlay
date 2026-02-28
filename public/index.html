@@ -14,7 +14,7 @@
     --twitch:   #9146FF;
     --youtube:  #FF0000;
     --kick:     #53FC18;
-    --joystick: #FF6B35;
+    --joystick: #00E5FF;
     --bg:       rgba(0, 0, 0, 0);
     --msg-bg:   rgba(15, 15, 20, 0.82);
     --radius:   10px;
@@ -131,13 +131,13 @@
   .platform-twitch   .platform-icon { background: var(--twitch); }
   .platform-youtube  .platform-icon { background: var(--youtube); }
   .platform-kick     .platform-icon { background: rgba(83,252,24,0.15); border: 1px solid var(--kick); }
-  .platform-joystick .platform-icon { background: var(--joystick); }
+  .platform-joystick .platform-icon { background: rgba(0,229,255,0.15); border: 1px solid var(--joystick); }
 
   /* SVG icons */
   .icon-twitch   { fill: white; }
   .icon-youtube  { fill: white; }
   .icon-kick     { fill: #53FC18; }
-  .icon-joystick { fill: white; }
+  .icon-joystick { fill: #00E5FF; }
 
   .fade-out {
     animation: fadeOut 0.4s ease forwards;
@@ -156,7 +156,7 @@ const ICONS = {
   twitch: `<svg viewBox="0 0 24 24" class="icon-twitch"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/></svg>`,
   youtube: `<svg viewBox="0 0 24 24" class="icon-youtube"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>`,
   kick: `<svg viewBox="0 0 24 24" class="icon-kick"><path d="M3 2h3.5v8l5-8H16l-6 9.5 6.5 10.5H12l-5.5-8.5V22H3V2z"/></svg>`,
-  joystick: `<svg viewBox="0 0 24 24" class="icon-joystick"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm0 4a1.5 1.5 0 0 1 1.5 1.5v3h3a1.5 1.5 0 0 1 0 3h-3v3a1.5 1.5 0 0 1-3 0v-3h-3a1.5 1.5 0 0 1 0-3h3v-3A1.5 1.5 0 0 1 12 6z"/></svg>`,
+  joystick: `<img src="data:image/png;base64,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" style="width:14px;height:14px;object-fit:contain;" />`,
 };
 
 const BADGE_LABELS = {
@@ -168,7 +168,7 @@ const BADGE_LABELS = {
 };
 
 const MAX_MESSAGES = 30;
-const MSG_LIFETIME_MS = 60000; // 60s
+const MSG_LIFETIME_MS = 0; // 0 = messages stay forever
 
 const chat = document.getElementById('chat');
 const timers = new Map();
@@ -211,8 +211,10 @@ function addMessage({ platform, username, message, color, badges }) {
   chat.prepend(div);
 
   // Auto-remove after lifetime
-  const timer = setTimeout(() => removeMessage(div), MSG_LIFETIME_MS);
-  timers.set(div, timer);
+  if (MSG_LIFETIME_MS > 0) {
+    const timer = setTimeout(() => removeMessage(div), MSG_LIFETIME_MS);
+    timers.set(div, timer);
+  }
 }
 
 function removeMessage(el) {
