@@ -439,18 +439,13 @@ function connectKickWebSocket(chatroomId, pusherKey) {
         return;
       }
 
-      // Log all non-system events so we can see what Kick is actually sending
-      if (!['pusher:connection_established','pusher:pong','pusher:ping','pusher_internal:subscription_succeeded'].includes(msg.event)) {
-        console.log('[Kick] Event received:', msg.event);
-      }
-
-      if (msg.event === 'App\\Events\\ChatMessageEvent') {
+      if (msg.event === 'App\\Events\\ChatMessageSentEvent') {
         const data = typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data;
-        const username = data?.sender?.username || data?.sender?.slug || 'Unknown';
-        const text = data?.content || '';
-        const color = data?.sender?.identity?.color || null;
-        const badges = (data?.sender?.identity?.badges || []).map(b => b.type);
-        console.log('[Kick] Chat message from', username, ':', text);
+        // New structure: data.message.content, data.user.username
+        const username = data?.user?.username || data?.sender?.username || data?.sender?.slug || 'Unknown';
+        const text = data?.message?.content || data?.content || '';
+        const color = data?.user?.identity?.color || data?.sender?.identity?.color || null;
+        const badges = (data?.user?.identity?.badges || data?.sender?.identity?.badges || []).map(b => b.type);
         if (text) broadcast('kick', username, text, color, badges);
       }
     } catch (e) { /* ignore parse errors */ }
