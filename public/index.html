@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MultiChat Overlay</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --twitch:   #9146FF;
+    --youtube:  #FF0000;
+    --kick:     #53FC18;
+    --joystick: #FF6B35;
+    --bg:       rgba(0, 0, 0, 0);
+    --msg-bg:   rgba(15, 15, 20, 0.82);
+    --radius:   10px;
+    --font:     'Nunito', sans-serif;
+  }
+
+  html, body {
+    background: transparent;
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
+    font-family: var(--font);
+  }
+
+  #chat {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 12px 10px;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 6px;
+    max-height: 100vh;
+    overflow: hidden;
+  }
+
+  .msg {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--msg-bg);
+    border-radius: var(--radius);
+    border-left: 3px solid var(--platform-color);
+    backdrop-filter: blur(6px);
+    animation: slideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    max-width: 100%;
+    word-break: break-word;
+    line-height: 1.4;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(-16px) scale(0.97); }
+    to   { opacity: 1; transform: translateX(0) scale(1); }
+  }
+
+  .platform-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    margin-top: 2px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .platform-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .msg-body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .msg-header {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 2px;
+    flex-wrap: wrap;
+  }
+
+  .username {
+    font-weight: 800;
+    font-size: 13px;
+    color: #fff;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  }
+
+  .badge {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 1px 4px;
+    border-radius: 3px;
+    opacity: 0.9;
+    background: rgba(255,255,255,0.15);
+    color: #fff;
+  }
+
+  .badge.mod    { background: rgba(0,173,240,0.4); }
+  .badge.sub    { background: rgba(145,70,255,0.4); }
+  .badge.owner, .badge.streamer { background: rgba(255,107,53,0.5); }
+  .badge.member { background: rgba(83,252,24,0.3); color: #53FC18; }
+  .badge.vip    { background: rgba(255,170,0,0.4); }
+
+  .msg-text {
+    font-size: 14px;
+    color: rgba(255,255,255,0.92);
+    font-weight: 600;
+  }
+
+  /* Platform colors */
+  .platform-twitch   { --platform-color: var(--twitch); }
+  .platform-youtube  { --platform-color: var(--youtube); }
+  .platform-kick     { --platform-color: var(--kick); }
+  .platform-joystick { --platform-color: var(--joystick); }
+
+  .platform-twitch   .platform-icon { background: var(--twitch); }
+  .platform-youtube  .platform-icon { background: var(--youtube); }
+  .platform-kick     .platform-icon { background: rgba(83,252,24,0.15); border: 1px solid var(--kick); }
+  .platform-joystick .platform-icon { background: var(--joystick); }
+
+  /* SVG icons */
+  .icon-twitch   { fill: white; }
+  .icon-youtube  { fill: white; }
+  .icon-kick     { fill: #53FC18; }
+  .icon-joystick { fill: white; }
+
+  .fade-out {
+    animation: fadeOut 0.4s ease forwards;
+  }
+  @keyframes fadeOut {
+    to { opacity: 0; transform: translateX(-10px); height: 0; padding: 0; margin: 0; }
+  }
+</style>
+</head>
+<body>
+<div id="chat"></div>
+
+<script>
+// SVG icons per platform
+const ICONS = {
+  twitch: `<svg viewBox="0 0 24 24" class="icon-twitch"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/></svg>`,
+  youtube: `<svg viewBox="0 0 24 24" class="icon-youtube"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>`,
+  kick: `<svg viewBox="0 0 24 24" class="icon-kick"><path d="M3 2h3.5v8l5-8H16l-6 9.5 6.5 10.5H12l-5.5-8.5V22H3V2z"/></svg>`,
+  joystick: `<svg viewBox="0 0 24 24" class="icon-joystick"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm0 4a1.5 1.5 0 0 1 1.5 1.5v3h3a1.5 1.5 0 0 1 0 3h-3v3a1.5 1.5 0 0 1-3 0v-3h-3a1.5 1.5 0 0 1 0-3h3v-3A1.5 1.5 0 0 1 12 6z"/></svg>`,
+};
+
+const BADGE_LABELS = {
+  moderator: 'MOD', mod: 'MOD',
+  subscriber: 'SUB', sub: 'SUB',
+  owner: 'OWNER', streamer: 'STREAM',
+  member: 'MEMBER', vip: 'VIP',
+  broadcaster: 'OWNER',
+};
+
+const MAX_MESSAGES = 30;
+const MSG_LIFETIME_MS = 60000; // 60s
+
+const chat = document.getElementById('chat');
+const timers = new Map();
+
+function addMessage({ platform, username, message, color, badges }) {
+  // Remove oldest if over limit
+  const msgs = chat.querySelectorAll('.msg');
+  if (msgs.length >= MAX_MESSAGES) {
+    const oldest = msgs[msgs.length - 1];
+    removeMessage(oldest);
+  }
+
+  const div = document.createElement('div');
+  div.className = `msg platform-${platform}`;
+
+  // Badges HTML
+  const badgeHtml = (badges || []).map(b => {
+    const label = BADGE_LABELS[b] || b.toUpperCase();
+    const cls = ['mod','moderator'].includes(b) ? 'mod'
+              : ['sub','subscriber'].includes(b) ? 'sub'
+              : ['owner','streamer','broadcaster'].includes(b) ? 'owner'
+              : b === 'member' ? 'member'
+              : b === 'vip' ? 'vip' : '';
+    return `<span class="badge ${cls}">${label}</span>`;
+  }).join('');
+
+  const nameColor = color ? `style="color:${color}"` : '';
+
+  div.innerHTML = `
+    <div class="platform-icon">${ICONS[platform] || ''}</div>
+    <div class="msg-body">
+      <div class="msg-header">
+        <span class="username" ${nameColor}>${escapeHtml(username)}</span>
+        ${badgeHtml}
+      </div>
+      <div class="msg-text">${escapeHtml(message)}</div>
+    </div>
+  `;
+
+  chat.prepend(div);
+
+  // Auto-remove after lifetime
+  const timer = setTimeout(() => removeMessage(div), MSG_LIFETIME_MS);
+  timers.set(div, timer);
+}
+
+function removeMessage(el) {
+  if (!el || !el.parentNode) return;
+  clearTimeout(timers.get(el));
+  timers.delete(el);
+  el.classList.add('fade-out');
+  setTimeout(() => el.remove(), 400);
+}
+
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// Connect to backend socket
+const socket = io();
+
+socket.on('chat_message', (data) => {
+  addMessage(data);
+});
+
+socket.on('connect', () => console.log('Connected to MultiChat server'));
+socket.on('disconnect', () => console.log('Disconnected from MultiChat server'));
+</script>
+</body>
+</html>

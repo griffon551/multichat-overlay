@@ -1,0 +1,50 @@
+version: "3.8"
+
+services:
+  multichat:
+    build:
+      context: https://github.com/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME.git#main
+      dockerfile: Dockerfile
+    container_name: multichat-overlay
+    restart: unless-stopped
+    ports:
+      - "3000:3000"    # Change left side if 3000 is taken on TrueNAS
+    environment:
+      PORT: 3000
+
+      # ── TWITCH ──────────────────────────────────────────────────────────────
+      # Get OAuth token at: https://twitchapps.com/tmi/
+      # Channel name WITHOUT the # symbol
+      TWITCH_CHANNEL: ""
+      TWITCH_OAUTH_TOKEN: ""        # Format: oauth:xxxxxxxxxxxxxx
+      TWITCH_BOT_USERNAME: ""       # Your bot or main account username
+
+      # ── YOUTUBE ─────────────────────────────────────────────────────────────
+      # Get API key at: https://console.cloud.google.com (YouTube Data API v3)
+      # Video ID is the ?v=XXXXXXXXX part of your stream URL
+      YOUTUBE_API_KEY: ""
+      YOUTUBE_LIVE_VIDEO_ID: ""
+      YOUTUBE_POLL_INTERVAL_MS: "5000"
+
+      # ── KICK ────────────────────────────────────────────────────────────────
+      # Just your channel name — the app will auto-fetch the chatroom ID
+      # If auto-fetch fails, manually find your chatroom ID and set it below
+      KICK_CHANNEL_NAME: ""
+      KICK_CHATROOM_ID: ""          # Optional: override auto-detection
+      KICK_PUSHER_KEY: "eb1d5f283081a78b932c"  # Kick's public Pusher key
+      KICK_PUSHER_CLUSTER: "us2"
+
+      # ── JOYSTICK.TV ─────────────────────────────────────────────────────────
+      # 1. Go to joystick.tv and create a bot application
+      # 2. Set the redirect URL to: http://YOUR_TRUENAS_IP:3000/joystick/callback
+      # 3. Fill in Client ID and Secret below, leave tokens blank
+      # 4. Visit http://YOUR_TRUENAS_IP:3000/joystick/auth to authorize
+      # 5. Copy the tokens from the callback page into the vars below & restart
+      JOYSTICK_CLIENT_ID: ""
+      JOYSTICK_CLIENT_SECRET: ""
+      JOYSTICK_ACCESS_TOKEN: ""     # Filled in after OAuth flow
+      JOYSTICK_REFRESH_TOKEN: ""    # Filled in after OAuth flow
+
+    # TrueNAS: map to your preferred dataset path if you want log persistence
+    # volumes:
+    #   - /mnt/pool/multichat/logs:/app/logs
