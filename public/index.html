@@ -44,17 +44,17 @@
 
   .msg {
     display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 8px 12px;
-    background: var(--msg-bg);
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background: transparent;
     border-radius: var(--radius);
     border-left: 3px solid var(--platform-color);
-    backdrop-filter: blur(6px);
     animation: slideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     max-width: 100%;
     word-break: break-word;
     line-height: 1.4;
+    flex-wrap: wrap;
   }
 
   @keyframes slideIn {
@@ -66,7 +66,6 @@
     width: 18px;
     height: 18px;
     flex-shrink: 0;
-    margin-top: 2px;
     border-radius: 3px;
     display: flex;
     align-items: center;
@@ -78,24 +77,12 @@
     height: 14px;
   }
 
-  .msg-body {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .msg-header {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    margin-bottom: 2px;
-    flex-wrap: wrap;
-  }
-
   .username {
     font-weight: 800;
     font-size: 13px;
     color: #fff;
-    text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+    flex-shrink: 0;
   }
 
   .badge {
@@ -106,8 +93,10 @@
     padding: 1px 4px;
     border-radius: 3px;
     opacity: 0.9;
-    background: rgba(255,255,255,0.15);
+    background: rgba(0,0,0,0.5);
     color: #fff;
+    flex-shrink: 0;
+    text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
   }
 
   .badge.mod    { background: rgba(0,173,240,0.4); }
@@ -119,6 +108,14 @@
   .msg-text {
     font-size: 14px;
     color: rgba(255,255,255,0.92);
+    font-weight: 600;
+    text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+  }
+
+  /* Colon separator between username and message */
+  .username::after {
+    content: ':';
+    color: rgba(255,255,255,0.4);
     font-weight: 600;
   }
 
@@ -199,13 +196,9 @@ function addMessage({ platform, username, message, color, badges }) {
 
   div.innerHTML = `
     <div class="platform-icon">${ICONS[platform] || ''}</div>
-    <div class="msg-body">
-      <div class="msg-header">
-        <span class="username" ${nameColor}>${escapeHtml(username)}</span>
-        ${badgeHtml}
-      </div>
-      <div class="msg-text">${escapeHtml(message)}</div>
-    </div>
+    ${badgeHtml}
+    <span class="username" ${nameColor}>${escapeHtml(username)}</span>
+    <span class="msg-text">${escapeHtml(message)}</span>
   `;
 
   chat.prepend(div);
