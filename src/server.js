@@ -441,18 +441,12 @@ function connectKickWebSocket(chatroomId, pusherKey) {
         return;
       }
 
-      // Temporary: log every event to diagnose Kick messages
-      if (msg.event && !['pusher:connection_established','pusher:pong','pusher:ping','pusher_internal:subscription_succeeded'].includes(msg.event)) {
-        console.log('[Kick] RAW event:', JSON.stringify(msg).substring(0, 300));
-      }
-
-      if (msg.event === 'App\\Events\\ChatMessageSentEvent') {
+      if (msg.event === 'App\\Events\\ChatMessageEvent') {
         const data = typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data;
-        // New structure: data.message.content, data.user.username
-        const username = data?.user?.username || data?.sender?.username || data?.sender?.slug || 'Unknown';
-        const text = data?.message?.content || data?.content || '';
-        const color = data?.user?.identity?.color || data?.sender?.identity?.color || null;
-        const badges = (data?.user?.identity?.badges || data?.sender?.identity?.badges || []).map(b => b.type);
+        const username = data?.sender?.username || data?.sender?.slug || 'Unknown';
+        const text = data?.content || '';
+        const color = data?.sender?.identity?.color || null;
+        const badges = (data?.sender?.identity?.badges || []).map(b => b.type);
         if (text) broadcast('kick', username, text, color, badges);
       }
     } catch (e) { /* ignore parse errors */ }
