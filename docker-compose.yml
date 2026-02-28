@@ -29,8 +29,11 @@ services:
 
       # ── YOUTUBE ─────────────────────────────────────────────────────────────
       # Get API key at: https://console.cloud.google.com (YouTube Data API v3)
-      # Video ID is the ?v=XXXXXXXXX part of your stream URL
+      # Set YOUTUBE_CHANNEL_ID to auto-detect your live stream every time you go live
+      # Find your channel ID at: https://www.youtube.com/account_advanced
+      # YOUTUBE_LIVE_VIDEO_ID is optional - only needed to force a specific stream
       YOUTUBE_API_KEY: ""
+      YOUTUBE_CHANNEL_ID: ""
       YOUTUBE_LIVE_VIDEO_ID: ""
       YOUTUBE_POLL_INTERVAL_MS: "5000"
 
