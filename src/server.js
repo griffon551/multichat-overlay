@@ -146,19 +146,90 @@ function connectTwitch() {
 }
 
 // ─── TWITCH OAUTH ROUTES ─────────────────────────────────────────────────────
+// Twitch requires HTTPS for redirect URIs except for localhost.
+// Set TWITCH_REDIRECT_URL in your env to override (e.g. http://localhost:3000/twitch/callback).
+// Then in the Twitch dev console, register that exact URL as your OAuth Redirect URL.
+
+function getTwitchRedirectUri(host) {
+  return process.env.TWITCH_REDIRECT_URL || `http://${host}/twitch/callback`;
+}
+
+// Step 1 — redirect user to Twitch to authorize
 app.get('/twitch/auth', (req, res) => {
+  const redirectUri = getTwitchRedirectUri(req.headers.host);
   const params = new URLSearchParams({
     client_id: config.twitch.clientId,
-    redirect_uri: `http://${req.headers.host}/twitch/callback`,
+    redirect_uri: redirectUri,
     response_type: 'code',
     scope: 'chat:read chat:edit',
   });
   res.redirect(`https://id.twitch.tv/oauth2/authorize?${params}`);
 });
 
+// Step 2 — Twitch redirects back here with ?code=...
+// If using localhost redirect, Twitch lands on your PC not the server.
+// In that case use /twitch/manual to paste the full redirect URL instead.
 app.get('/twitch/callback', async (req, res) => {
   const { code } = req.query;
   if (!code) return res.send('No code received');
+  await exchangeTwitchCode(code, getTwitchRedirectUri(req.headers.host), res);
+});
+
+// Manual entry page — paste the full redirect URL from your browser here
+// Useful when using localhost redirect on a headless server
+app.get('/twitch/manual', (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head><title>Twitch Manual Auth</title>
+    <style>
+      body { font-family: sans-serif; max-width: 700px; margin: 40px auto; padding: 20px; background: #0e0e10; color: #efeff1; }
+      h2 { color: #9146ff; }
+      input { width: 100%; padding: 10px; margin: 10px 0; background: #1f1f23; border: 1px solid #3a3a3d; color: #efeff1; border-radius: 4px; font-size: 14px; }
+      button { background: #9146ff; color: white; border: none; padding: 10px 24px; border-radius: 4px; font-size: 15px; cursor: pointer; }
+      button:hover { background: #772ce8; }
+      ol { line-height: 2; }
+      code { background: #1f1f23; padding: 2px 6px; border-radius: 3px; }
+    </style>
+    </head>
+    <body>
+      <h2>🔐 Twitch Manual Authorization</h2>
+      <p>Use this if your server can't receive the Twitch redirect directly.</p>
+      <ol>
+        <li>Register <code>http://localhost:3000/twitch/callback</code> as your OAuth Redirect URL in the <a href="https://dev.twitch.tv/console" style="color:#9146ff">Twitch dev console</a></li>
+        <li>Set <code>TWITCH_REDIRECT_URL=http://localhost:3000/twitch/callback</code> in your Dockge env vars</li>
+        <li>On the machine you're reading this from, visit <a href="/twitch/auth" style="color:#9146ff">this link to start the Twitch auth flow</a></li>
+        <li>Twitch will redirect your browser to <code>http://localhost:3000/twitch/callback?code=...</code> — that page won't load, but copy the full URL from your browser address bar</li>
+        <li>Paste the full URL below and click Submit</li>
+      </ol>
+      <input type="text" id="url" placeholder="http://localhost:3000/twitch/callback?code=abc123&scope=..." />
+      <button onclick="submit()">Submit</button>
+      <div id="result" style="margin-top:20px"></div>
+      <script>
+        async function submit() {
+          const raw = document.getElementById('url').value.trim();
+          let code;
+          try { code = new URL(raw).searchParams.get('code'); } catch(e) {}
+          if (!code) { document.getElementById('result').innerHTML = '<p style="color:red">Could not find a code in that URL. Make sure you pasted the full redirect URL.</p>'; return; }
+          document.getElementById('result').innerHTML = '<p>Exchanging code...</p>';
+          const res = await fetch('/twitch/exchange?code=' + encodeURIComponent(code));
+          const text = await res.text();
+          document.getElementById('result').innerHTML = text;
+        }
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+// Internal exchange endpoint used by the manual page
+app.get('/twitch/exchange', async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.send('<p style="color:red">No code provided.</p>');
+  await exchangeTwitchCode(code, getTwitchRedirectUri(req.headers.host), res);
+});
+
+async function exchangeTwitchCode(code, redirectUri, res) {
   try {
     const tokenRes = await fetch('https://id.twitch.tv/oauth2/token', {
       method: 'POST',
@@ -168,7 +239,7 @@ app.get('/twitch/callback', async (req, res) => {
         client_secret: config.twitch.clientSecret,
         code,
         grant_type: 'authorization_code',
-        redirect_uri: `http://${req.headers.host}/twitch/callback`,
+        redirect_uri: redirectUri,
       }),
     });
     const data = await tokenRes.json();
@@ -188,12 +259,12 @@ TWITCH_BOT_USERNAME=${twitchUsername || ''}
       `);
       connectTwitch();
     } else {
-      res.send('Error: ' + JSON.stringify(data));
+      res.send('<h2>❌ Authorization failed</h2><pre>' + JSON.stringify(data, null, 2) + '</pre>');
     }
   } catch (err) {
     res.send('Error: ' + err.message);
   }
-});
+}
 
 // ─── YOUTUBE ─────────────────────────────────────────────────────────────────
 function connectYoutube() {
