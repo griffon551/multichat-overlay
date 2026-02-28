@@ -44,11 +44,17 @@ Only fill in the platforms you use — unused platforms are simply skipped.
 
 ## 🔑 Getting API Credentials
 
-### Twitch
-1. Go to https://twitchapps.com/tmi/ and click "Connect with Twitch"
-2. Copy the `oauth:xxxxxx` token → `TWITCH_OAUTH_TOKEN`
-3. Set `TWITCH_CHANNEL` to your channel name (no `#`)
-4. Set `TWITCH_BOT_USERNAME` to your account username
+### Twitch *(OAuth required — one-time setup)*
+1. Go to [dev.twitch.tv/console](https://dev.twitch.tv/console) and click **Register Your Application**
+2. Give it any name (e.g. `My MultiChat`), set Category to **Chat Bot**
+3. Set the **OAuth Redirect URL** to: `http://YOUR_TRUENAS_IP:3000/twitch/callback`
+4. Click **Create**, then copy the **Client ID** and generate a **Client Secret**
+5. Add those to `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET` in Dockge, along with your `TWITCH_CHANNEL`
+6. Deploy the stack, then visit: `http://YOUR_TRUENAS_IP:3000/twitch/auth`
+7. Authorize the app on Twitch
+8. Copy the `TWITCH_ACCESS_TOKEN`, `TWITCH_REFRESH_TOKEN`, and `TWITCH_BOT_USERNAME` from the page shown
+9. Update those env vars in Dockge and restart the stack
+10. Tokens auto-refresh after that — no further manual steps needed
 
 ### YouTube
 1. Go to https://console.cloud.google.com
@@ -120,6 +126,7 @@ Visit `http://YOUR_TRUENAS_IP:3000/status` to see which platforms are connected:
 ```json
 {
   "twitch": true,
+  "twitchAuthed": true,
   "youtube": false,
   "kick": true,
   "joystick": true,
@@ -132,8 +139,9 @@ Visit `http://YOUR_TRUENAS_IP:3000/status` to see which platforms are connected:
 ## 🐛 Troubleshooting
 
 **Twitch not connecting**
-- Make sure the OAuth token starts with `oauth:`
-- Try generating a fresh token at twitchapps.com/tmi
+- Make sure you completed the OAuth flow at `/twitch/auth`
+- Check that your redirect URL in the Twitch dev console exactly matches `http://YOUR_TRUENAS_IP:3000/twitch/callback`
+- If your token expired and auto-refresh failed, re-run the auth flow at `/twitch/auth`
 
 **YouTube not showing chat**
 - YouTube chat only works during an active live stream
