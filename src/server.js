@@ -15,10 +15,13 @@ const PORT = process.env.PORT || 3000;
 // ─── Config from env ────────────────────────────────────────────────────────
 const config = {
   twitch: {
-    enabled: !!(process.env.TWITCH_CHANNEL && process.env.TWITCH_OAUTH_TOKEN),
+    enabled: !!(process.env.TWITCH_CHANNEL && process.env.TWITCH_CLIENT_ID && process.env.TWITCH_CLIENT_SECRET),
     channel: process.env.TWITCH_CHANNEL,
-    oauthToken: process.env.TWITCH_OAUTH_TOKEN, // "oauth:xxxx"
-    botUsername: process.env.TWITCH_BOT_USERNAME || 'justinfan12345',
+    clientId: process.env.TWITCH_CLIENT_ID,
+    clientSecret: process.env.TWITCH_CLIENT_SECRET,
+    accessToken: process.env.TWITCH_ACCESS_TOKEN || null,
+    refreshToken: process.env.TWITCH_REFRESH_TOKEN || null,
+    botUsername: process.env.TWITCH_BOT_USERNAME || null,
   },
   youtube: {
     enabled: !!(process.env.YOUTUBE_API_KEY && process.env.YOUTUBE_LIVE_VIDEO_ID),
@@ -44,64 +47,155 @@ const config = {
 
 // ─── Broadcast helper ────────────────────────────────────────────────────────
 function broadcast(platform, username, message, color, badges) {
-  const payload = {
-    platform,
-    username,
-    message,
-    color: color || null,
-    badges: badges || [],
-    ts: Date.now(),
-  };
+  const payload = { platform, username, message, color: color || null, badges: badges || [], ts: Date.now() };
   console.log(`[${platform}] ${username}: ${message}`);
   io.emit('chat_message', payload);
 }
 
 // ─── TWITCH ──────────────────────────────────────────────────────────────────
+let twitchAccessToken = config.twitch.accessToken;
+let twitchRefreshToken = config.twitch.refreshToken;
+let twitchUsername = config.twitch.botUsername;
+
+async function refreshTwitchToken() {
+  try {
+    const res = await fetch('https://id.twitch.tv/oauth2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: twitchRefreshToken,
+        client_id: config.twitch.clientId,
+        client_secret: config.twitch.clientSecret,
+      }),
+    });
+    const data = await res.json();
+    if (data.access_token) {
+      twitchAccessToken = data.access_token;
+      twitchRefreshToken = data.refresh_token;
+      console.log('[Twitch] Token refreshed successfully');
+      return true;
+    }
+    console.error('[Twitch] Token refresh failed:', data);
+    return false;
+  } catch (err) {
+    console.error('[Twitch] Token refresh error:', err.message);
+    return false;
+  }
+}
+
+async function fetchTwitchUsername() {
+  try {
+    const res = await fetch('https://api.twitch.tv/helix/users', {
+      headers: {
+        'Authorization': `Bearer ${twitchAccessToken}`,
+        'Client-Id': config.twitch.clientId,
+      },
+    });
+    const data = await res.json();
+    return data.data?.[0]?.login || null;
+  } catch (err) {
+    console.error('[Twitch] Failed to fetch username:', err.message);
+    return null;
+  }
+}
+
 function connectTwitch() {
   if (!config.twitch.enabled) return console.log('[Twitch] Disabled - missing env vars');
+  if (!twitchAccessToken) {
+    console.log('[Twitch] No access token. Visit http://localhost:' + PORT + '/twitch/auth to authorize.');
+    return;
+  }
 
   const channel = config.twitch.channel.toLowerCase().replace('#', '');
   const ws = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
 
-  ws.on('open', () => {
-    ws.send(`PASS ${config.twitch.oauthToken}`);
-    ws.send(`NICK ${config.twitch.botUsername}`);
+  ws.on('open', async () => {
+    if (!twitchUsername) twitchUsername = await fetchTwitchUsername();
+    ws.send(`PASS oauth:${twitchAccessToken}`);
+    ws.send(`NICK ${twitchUsername || 'justinfan12345'}`);
     ws.send('CAP REQ :twitch.tv/tags twitch.tv/commands');
     ws.send(`JOIN #${channel}`);
-    console.log(`[Twitch] Connected to #${channel}`);
+    console.log(`[Twitch] Connected to #${channel} as ${twitchUsername}`);
   });
 
   ws.on('message', (raw) => {
     const data = raw.toString();
-    if (data.startsWith('PING')) {
-      ws.send('PONG :tmi.twitch.tv');
+    if (data.startsWith('PING')) { ws.send('PONG :tmi.twitch.tv'); return; }
+    if (data.includes('NOTICE * :Login authentication failed')) {
+      console.log('[Twitch] Auth failed, attempting token refresh...');
+      ws.close();
       return;
     }
-
     const tagMatch = data.match(/^@([^ ]+) :([^!]+)![^ ]+ PRIVMSG #\S+ :(.+)$/);
     if (!tagMatch) return;
-
     const tags = {};
-    tagMatch[1].split(';').forEach(t => {
-      const [k, v] = t.split('=');
-      tags[k] = v;
-    });
-
+    tagMatch[1].split(';').forEach(t => { const [k, v] = t.split('='); tags[k] = v; });
     const username = tags['display-name'] || tagMatch[2];
     const message = tagMatch[3].trim();
     const color = tags['color'] || null;
     const badges = tags['badges'] ? tags['badges'].split(',').map(b => b.split('/')[0]) : [];
-
     broadcast('twitch', username, message, color, badges);
   });
 
-  ws.on('close', () => {
-    console.log('[Twitch] Disconnected, reconnecting in 5s...');
-    setTimeout(connectTwitch, 5000);
+  ws.on('close', async () => {
+    console.log('[Twitch] Disconnected, attempting reconnect...');
+    const refreshed = await refreshTwitchToken();
+    setTimeout(connectTwitch, refreshed ? 1000 : 10000);
   });
 
   ws.on('error', (err) => console.error('[Twitch] Error:', err.message));
 }
+
+// ─── TWITCH OAUTH ROUTES ─────────────────────────────────────────────────────
+app.get('/twitch/auth', (req, res) => {
+  const params = new URLSearchParams({
+    client_id: config.twitch.clientId,
+    redirect_uri: `http://${req.headers.host}/twitch/callback`,
+    response_type: 'code',
+    scope: 'chat:read chat:edit',
+  });
+  res.redirect(`https://id.twitch.tv/oauth2/authorize?${params}`);
+});
+
+app.get('/twitch/callback', async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.send('No code received');
+  try {
+    const tokenRes = await fetch('https://id.twitch.tv/oauth2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: config.twitch.clientId,
+        client_secret: config.twitch.clientSecret,
+        code,
+        grant_type: 'authorization_code',
+        redirect_uri: `http://${req.headers.host}/twitch/callback`,
+      }),
+    });
+    const data = await tokenRes.json();
+    if (data.access_token) {
+      twitchAccessToken = data.access_token;
+      twitchRefreshToken = data.refresh_token;
+      twitchUsername = await fetchTwitchUsername();
+      res.send(`
+        <h2>✅ Twitch Authorized!</h2>
+        <p>Add these to your docker-compose.yml environment variables, then restart:</p>
+        <pre>
+TWITCH_ACCESS_TOKEN=${data.access_token}
+TWITCH_REFRESH_TOKEN=${data.refresh_token}
+TWITCH_BOT_USERNAME=${twitchUsername || ''}
+        </pre>
+        <p>Connecting now...</p>
+      `);
+      connectTwitch();
+    } else {
+      res.send('Error: ' + JSON.stringify(data));
+    }
+  } catch (err) {
+    res.send('Error: ' + err.message);
+  }
+});
 
 // ─── YOUTUBE ─────────────────────────────────────────────────────────────────
 function connectYoutube() {
@@ -147,20 +241,14 @@ function connectYoutube() {
       for (const item of (data.items || [])) {
         if (seenIds.has(item.id)) continue;
         seenIds.add(item.id);
-        if (seenIds.size > 500) {
-          const first = seenIds.values().next().value;
-          seenIds.delete(first);
-        }
-
+        if (seenIds.size > 500) { const first = seenIds.values().next().value; seenIds.delete(first); }
         const author = item.authorDetails;
         const text = item.snippet?.displayMessage;
         if (!text) continue;
-
         const badges = [];
         if (author.isChatOwner) badges.push('owner');
         if (author.isChatModerator) badges.push('moderator');
         if (author.isChatSponsor) badges.push('member');
-
         broadcast('youtube', author.displayName, text, null, badges);
       }
 
@@ -176,17 +264,14 @@ function connectYoutube() {
 }
 
 // ─── KICK ────────────────────────────────────────────────────────────────────
-// Kick uses Pusher for real-time chat
 function connectKick() {
   if (!config.kick.enabled) return console.log('[Kick] Disabled - missing env vars');
 
-  // Connect to Kick's Pusher instance
   const pusherKey = config.kick.pusherKey;
   const cluster = config.kick.pusherCluster;
   const chatroomId = config.kick.chatroomId;
 
   if (!chatroomId) {
-    // Try to fetch chatroom ID from Kick API
     fetchKickChatroomId().then(id => {
       if (id) connectKickPusher(pusherKey, cluster, id);
       else console.error('[Kick] Could not get chatroom ID');
@@ -218,19 +303,13 @@ function connectKickPusher(pusherKey, cluster, chatroomId) {
 
   ws.on('open', () => {
     console.log(`[Kick] Pusher connected, joining chatroom ${chatroomId}`);
-    ws.send(JSON.stringify({
-      event: 'pusher:subscribe',
-      data: { auth: '', channel: `chatrooms.${chatroomId}.v2` }
-    }));
+    ws.send(JSON.stringify({ event: 'pusher:subscribe', data: { auth: '', channel: `chatrooms.${chatroomId}.v2` } }));
   });
 
   ws.on('message', (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
-      if (msg.event === 'pusher:ping') {
-        ws.send(JSON.stringify({ event: 'pusher:pong', data: {} }));
-        return;
-      }
+      if (msg.event === 'pusher:ping') { ws.send(JSON.stringify({ event: 'pusher:pong', data: {} })); return; }
       if (msg.event === 'App\\Events\\ChatMessageEvent') {
         const data = typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data;
         const username = data?.sender?.username || data?.sender?.slug || 'Unknown';
@@ -239,9 +318,7 @@ function connectKickPusher(pusherKey, cluster, chatroomId) {
         const badges = (data?.sender?.identity?.badges || []).map(b => b.type);
         if (text) broadcast('kick', username, text, color, badges);
       }
-    } catch (e) {
-      // ignore parse errors
-    }
+    } catch (e) { /* ignore parse errors */ }
   });
 
   ws.on('close', () => {
@@ -291,7 +368,7 @@ async function refreshJoystickToken() {
 function connectJoystick() {
   if (!config.joystick.enabled) return console.log('[Joystick] Disabled - missing env vars');
   if (!joystickAccessToken) {
-    console.log('[Joystick] No access token. Please complete OAuth flow at http://localhost:' + PORT + '/joystick/auth');
+    console.log('[Joystick] No access token. Visit http://localhost:' + PORT + '/joystick/auth to authorize.');
     return;
   }
 
@@ -300,24 +377,16 @@ function connectJoystick() {
 
   ws.on('open', () => {
     console.log('[Joystick] Connected, subscribing to GatewayChannel...');
-    ws.send(JSON.stringify({
-      command: 'subscribe',
-      identifier: JSON.stringify({ channel: 'GatewayChannel' }),
-    }));
+    ws.send(JSON.stringify({ command: 'subscribe', identifier: JSON.stringify({ channel: 'GatewayChannel' }) }));
   });
 
   ws.on('message', (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
       if (msg.type === 'ping') return;
-      if (msg.type === 'confirm_subscription') {
-        console.log('[Joystick] Subscribed to GatewayChannel');
-        return;
-      }
-
+      if (msg.type === 'confirm_subscription') { console.log('[Joystick] Subscribed to GatewayChannel'); return; }
       const payload = msg.message;
       if (!payload) return;
-
       if (payload.event === 'ChatMessage' && payload.type === 'new_message') {
         const username = payload.author?.username || 'Unknown';
         const text = payload.text || '';
@@ -328,9 +397,7 @@ function connectJoystick() {
         if (payload.author?.isSubscriber) badges.push('subscriber');
         if (text) broadcast('joystick', username, text, color, badges);
       }
-    } catch (e) {
-      // ignore
-    }
+    } catch (e) { /* ignore */ }
   });
 
   ws.on('close', async () => {
@@ -342,7 +409,7 @@ function connectJoystick() {
   ws.on('error', (err) => console.error('[Joystick] Error:', err.message));
 }
 
-// ─── JOYSTICK OAUTH HELPER ROUTES ────────────────────────────────────────────
+// ─── JOYSTICK OAUTH ROUTES ───────────────────────────────────────────────────
 app.get('/joystick/auth', (req, res) => {
   const url = `https://joystick.tv/api/oauth/authorize?response_type=code&client_id=${config.joystick.clientId}&scope=bot`;
   res.redirect(url);
@@ -351,7 +418,6 @@ app.get('/joystick/auth', (req, res) => {
 app.get('/joystick/callback', async (req, res) => {
   const { code } = req.query;
   if (!code) return res.send('No code received');
-
   try {
     const response = await fetch(
       `https://joystick.tv/api/oauth/token?redirect_uri=unused&code=${code}&grant_type=authorization_code`,
@@ -390,6 +456,7 @@ JOYSTICK_REFRESH_TOKEN=${data.refresh_token}
 app.get('/status', (req, res) => {
   res.json({
     twitch: config.twitch.enabled,
+    twitchAuthed: !!twitchAccessToken,
     youtube: config.youtube.enabled,
     kick: config.kick.enabled,
     joystick: config.joystick.enabled,
@@ -400,7 +467,7 @@ app.get('/status', (req, res) => {
 // ─── Static browser source ───────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, '../public')));
 
-// ─── Socket.io connection ────────────────────────────────────────────────────
+// ─── Socket.io ───────────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
   console.log('[WS] OBS browser source connected');
   socket.emit('status', {
@@ -411,11 +478,13 @@ io.on('connection', (socket) => {
   });
 });
 
-// ─── Start everything ────────────────────────────────────────────────────────
+// ─── Start ───────────────────────────────────────────────────────────────────
 server.listen(PORT, () => {
   console.log(`\n🎮 MultiChat server running on port ${PORT}`);
-  console.log(`   Browser source URL: http://localhost:${PORT}/`);
-  console.log(`   Status: http://localhost:${PORT}/status\n`);
+  console.log(`   Browser source:  http://localhost:${PORT}/`);
+  console.log(`   Status:          http://localhost:${PORT}/status`);
+  console.log(`   Twitch auth:     http://localhost:${PORT}/twitch/auth`);
+  console.log(`   Joystick auth:   http://localhost:${PORT}/joystick/auth\n`);
 
   connectTwitch();
   connectYoutube();
