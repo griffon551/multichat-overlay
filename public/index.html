@@ -187,7 +187,7 @@ function addMessage({ platform, username, message, color, badges }) {
     <div class="platform-icon">${ICONS[platform] || ''}</div>
     ${badgeHtml}
     <span class="username" ${nameColor}>${escapeHtml(username)}</span>
-    <span class="msg-text">${escapeHtml(message)}</span>
+    <span class="msg-text">${message}</span>
   `;
 
   chat.prepend(div);
