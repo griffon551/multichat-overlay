@@ -133,9 +133,28 @@ function connectTwitch() {
       const tags = {};
       tagMatch[1].split(';').forEach(t => { const [k, v] = t.split('='); tags[k] = v; });
       const username = tags['display-name'] || tagMatch[2];
-      const message = tagMatch[3].trim();
+      const rawMessage = tagMatch[3].trim();
       const color = tags['color'] || null;
       const badges = tags['badges'] ? tags['badges'].split(',').map(b => b.split('/')[0]) : [];
+      // Replace Twitch emotes with images using the emotes tag
+      let message = rawMessage;
+      if (tags['emotes']) {
+        // emotes tag format: emoteId:start-end,start-end/emoteId2:start-end
+        const emoteMap = {};
+        tags['emotes'].split('/').forEach(entry => {
+          const [id, positions] = entry.split(':');
+          if (!id || !positions) return;
+          const pos = positions.split(',')[0].split('-');
+          const start = parseInt(pos[0]);
+          const end = parseInt(pos[1]);
+          const name = rawMessage.substring(start, end + 1);
+          emoteMap[name] = `<img src="https://static-cdn.jtvnw.net/emoticons/v2/${id}/default/dark/1.0" style="height:1.4em;vertical-align:middle;display:inline-block;" alt="${name}">`;
+        });
+        // Replace emote names with images (longest first to avoid partial matches)
+        Object.keys(emoteMap).sort((a,b) => b.length - a.length).forEach(name => {
+          message = message.split(name).join(emoteMap[name]);
+        });
+      }
       broadcast('twitch', username, message, color, badges);
     }
   });
@@ -271,97 +290,129 @@ TWITCH_BOT_USERNAME=${twitchUsername || ''}
 }
 
 // ─── YOUTUBE ─────────────────────────────────────────────────────────────────
-function connectYoutube() {
-  if (!config.youtube.enabled) return console.log('[YouTube] Disabled - missing env vars');
+const YOUTUBE_TIMEOUT_MS  = 15 * 60 * 1000; // 15 minutes
+const YOUTUBE_RECONNECT_DELAY = 10 * 1000;  // 10s reconnect on transient error
 
-  let liveChatId = null;
-  let nextPageToken = null;
-  const seenIds = new Set();
+let youtubeActive    = false;
+let youtubePollTimer = null;
+let youtubeExpireTimer = null;
+let youtubeLiveChatId  = null;
+let youtubeNextToken   = null;
+const youtubeSeenIds   = new Set();
 
-  // If a specific video ID is set, use it directly.
-  // Otherwise search the channel for an active live stream.
-  async function getLiveChatId() {
-    if (config.youtube.videoId) {
-      // Direct video ID lookup
-      const url = `https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${config.youtube.videoId}&key=${config.youtube.apiKey}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      return data.items?.[0]?.liveStreamingDetails?.activeLiveChatId || null;
-    } else {
-      // Auto-detect active live stream from channel
-      const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${config.youtube.channelId}&eventType=live&type=video&key=${config.youtube.apiKey}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.error) {
-        console.error('[YouTube] Search API error:', data.error.message);
-        return null;
-      }
-      const videoId = data.items?.[0]?.id?.videoId;
-      if (!videoId) return null;
-      console.log('[YouTube] Found live stream video ID:', videoId);
-      // Now get the live chat ID from the video
-      const vRes = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${videoId}&key=${config.youtube.apiKey}`);
-      const vData = await vRes.json();
-      return vData.items?.[0]?.liveStreamingDetails?.activeLiveChatId || null;
-    }
+function youtubeReset(reason) {
+  console.log(`[YouTube] Reset: ${reason}`);
+  youtubeActive = false;
+  youtubeLiveChatId = null;
+  youtubeNextToken  = null;
+  if (youtubePollTimer)   { clearTimeout(youtubePollTimer);   youtubePollTimer   = null; }
+  if (youtubeExpireTimer) { clearTimeout(youtubeExpireTimer); youtubeExpireTimer = null; }
+}
+
+async function youtubeGetLiveChatId() {
+  if (config.youtube.videoId) {
+    const url = `https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${config.youtube.videoId}&key=${config.youtube.apiKey}`;
+    const res  = await fetch(url);
+    const data = await res.json();
+    return data.items?.[0]?.liveStreamingDetails?.activeLiveChatId || null;
+  } else {
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${config.youtube.channelId}&eventType=live&type=video&key=${config.youtube.apiKey}`;
+    const res  = await fetch(url);
+    const data = await res.json();
+    if (data.error) { console.error('[YouTube] Search API error:', data.error.message); return null; }
+    const videoId = data.items?.[0]?.id?.videoId;
+    if (!videoId) return null;
+    console.log('[YouTube] Found live stream:', videoId);
+    const vRes  = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${videoId}&key=${config.youtube.apiKey}`);
+    const vData = await vRes.json();
+    return vData.items?.[0]?.liveStreamingDetails?.activeLiveChatId || null;
   }
+}
 
-  async function pollMessages() {
-    try {
-      if (!liveChatId) {
-        liveChatId = await getLiveChatId();
-        if (!liveChatId) {
-          console.log('[YouTube] No active live stream found, retrying in 60s...');
-          setTimeout(pollMessages, 60000);
-          return;
-        }
-        console.log('[YouTube] Connected to live chat:', liveChatId);
-      }
-      let url = `https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${liveChatId}&part=snippet,authorDetails&key=${config.youtube.apiKey}`;
-      if (nextPageToken) url += `&pageToken=${nextPageToken}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.error) {
-        console.error('[YouTube] API Error:', data.error.message);
-        // If the live chat is no longer valid (stream ended), reset and wait
-        if (data.error.code === 403 || data.error.code === 404) {
-          console.log('[YouTube] Live chat ended, waiting for next stream...');
-          liveChatId = null;
-          nextPageToken = null;
-        }
-        // If quota exceeded, back off for 1 hour
-        if (data.error.code === 403 && data.error.message && data.error.message.includes('quota')) {
-          console.log('[YouTube] Quota exceeded, backing off for 1 hour...');
-          setTimeout(pollMessages, 3600000);
-          return;
-        }
-        setTimeout(pollMessages, 60000);
+async function youtubePoll() {
+  youtubePollTimer = null;
+  if (!youtubeActive) return;
+  try {
+    if (!youtubeLiveChatId) {
+      youtubeLiveChatId = await youtubeGetLiveChatId();
+      if (!youtubeLiveChatId) {
+        console.log('[YouTube] No active live stream found, retrying in 30s...');
+        youtubePollTimer = setTimeout(youtubePoll, 30000);
         return;
       }
-      nextPageToken = data.nextPageToken;
-      for (const item of (data.items || [])) {
-        if (seenIds.has(item.id)) continue;
-        seenIds.add(item.id);
-        if (seenIds.size > 500) { const first = seenIds.values().next().value; seenIds.delete(first); }
-        const author = item.authorDetails;
-        const text = item.snippet?.displayMessage;
-        if (!text) continue;
-        const badges = [];
-        if (author.isChatOwner) badges.push('owner');
-        if (author.isChatModerator) badges.push('moderator');
-        if (author.isChatSponsor) badges.push('member');
-        broadcast('youtube', author.displayName, text, null, badges);
-      }
-      // Respect YouTube's requested interval, minimum 30s to preserve quota
-      const pollIn = Math.max(data.pollingIntervalMillis || config.youtube.pollInterval, 30000);
-      setTimeout(pollMessages, pollIn);
-    } catch (err) {
-      console.error('[YouTube] Error:', err.message);
-      setTimeout(pollMessages, 10000);
+      console.log('[YouTube] Connected to live chat:', youtubeLiveChatId);
     }
-  }
 
-  pollMessages();
+    let url = `https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${youtubeLiveChatId}&part=snippet,authorDetails&key=${config.youtube.apiKey}`;
+    if (youtubeNextToken) url += `&pageToken=${youtubeNextToken}`;
+
+    const res  = await fetch(url);
+    const data = await res.json();
+
+    if (data.error) {
+      const code = data.error.code;
+      const msg  = data.error.message || '';
+      console.error('[YouTube] API Error:', msg);
+
+      if (msg.includes('quota')) {
+        console.log('[YouTube] Quota exceeded — resetting. Re-trigger when ready.');
+        youtubeReset('quota exceeded');
+        return;
+      }
+      if (code === 403 || code === 404) {
+        // Stream ended — auto-reconnect after short delay in case of blip
+        console.log('[YouTube] Chat unavailable, attempting reconnect in 10s...');
+        youtubeLiveChatId = null;
+        youtubeNextToken  = null;
+        youtubePollTimer  = setTimeout(youtubePoll, YOUTUBE_RECONNECT_DELAY);
+        return;
+      }
+      // Other transient error — retry
+      youtubePollTimer = setTimeout(youtubePoll, YOUTUBE_RECONNECT_DELAY);
+      return;
+    }
+
+    youtubeNextToken = data.nextPageToken;
+    for (const item of (data.items || [])) {
+      if (youtubeSeenIds.has(item.id)) continue;
+      youtubeSeenIds.add(item.id);
+      if (youtubeSeenIds.size > 500) { const first = youtubeSeenIds.values().next().value; youtubeSeenIds.delete(first); }
+      const author = item.authorDetails;
+      const text   = item.snippet?.displayMessage;
+      if (!text) continue;
+      const badges = [];
+      if (author.isChatOwner)     badges.push('owner');
+      if (author.isChatModerator) badges.push('moderator');
+      if (author.isChatSponsor)   badges.push('member');
+      broadcast('youtube', author.displayName, text, null, badges);
+    }
+
+    // Respect YouTube's requested interval, minimum 30s to preserve quota
+    const pollIn = Math.max(data.pollingIntervalMillis || config.youtube.pollInterval, 30000);
+    youtubePollTimer = setTimeout(youtubePoll, pollIn);
+
+  } catch (err) {
+    console.error('[YouTube] Error:', err.message);
+    if (youtubeActive) youtubePollTimer = setTimeout(youtubePoll, YOUTUBE_RECONNECT_DELAY);
+  }
+}
+
+function connectYoutube(manual = false) {
+  if (!config.youtube.enabled) return console.log('[YouTube] Disabled - missing env vars');
+  if (youtubeActive) {
+    console.log('[YouTube] Already active — resetting first');
+    youtubeReset('re-triggered');
+  }
+  console.log(`[YouTube] ${manual ? 'Manual trigger' : 'Auto-start'} — connecting...`);
+  youtubeActive = true;
+
+  // 15-minute auto-expire timeout
+  youtubeExpireTimer = setTimeout(() => {
+    console.log('[YouTube] 15-minute timeout reached — resetting. Re-trigger to reconnect.');
+    youtubeReset('15-minute timeout');
+  }, YOUTUBE_TIMEOUT_MS);
+
+  youtubePoll();
 }
 
 // ─── KICK ────────────────────────────────────────────────────────────────────
@@ -622,6 +673,22 @@ JOYSTICK_REFRESH_TOKEN=${data.refresh_token}
   }
 });
 
+// ─── Streamer.bot webhooks — start / reset YouTube ───────────────────────────
+// Start: call at stream begin  →  GET http://SERVER:3030/youtube/start
+// Reset: call at stream end    →  GET http://SERVER:3030/youtube/reset
+['get','post'].forEach(method => {
+  app[method]('/youtube/start', (req, res) => {
+    console.log('[YouTube] /start triggered');
+    connectYoutube(true);
+    res.json({ ok: true, status: 'started' });
+  });
+  app[method]('/youtube/reset', (req, res) => {
+    console.log('[YouTube] /reset triggered');
+    youtubeReset('manual reset via webhook');
+    res.json({ ok: true, status: 'reset' });
+  });
+});
+
 // ─── Status endpoint ─────────────────────────────────────────────────────────
 app.get('/status', (req, res) => {
   res.json({
@@ -657,7 +724,7 @@ server.listen(PORT, () => {
   console.log(`   Joystick auth:   http://localhost:${PORT}/joystick/auth\n`);
 
   connectTwitch();
-  connectYoutube();
+  if (!process.env.YOUTUBE_STREAMERBOT_TRIGGER) connectYoutube(); // auto-start unless manual trigger mode
   connectKick();
   connectJoystick();
 });
