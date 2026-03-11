@@ -36,6 +36,8 @@ services:
       YOUTUBE_CHANNEL_ID: ""
       YOUTUBE_LIVE_VIDEO_ID: ""
       YOUTUBE_POLL_INTERVAL_MS: "5000"
+      # Set to "true" to disable auto-start and wait for Streamer.bot to trigger via GET /youtube/start
+      YOUTUBE_STREAMERBOT_TRIGGER: ""
 
       # ── KICK ────────────────────────────────────────────────────────────────
       # Just your channel name - the app will auto-fetch the chatroom ID
