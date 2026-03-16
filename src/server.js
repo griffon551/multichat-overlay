@@ -32,7 +32,7 @@ const config = {
     refreshToken: process.env.YOUTUBE_REFRESH_TOKEN || null,
     channelId: process.env.YOUTUBE_CHANNEL_ID || null,
     videoId: process.env.YOUTUBE_LIVE_VIDEO_ID || null,
-    pollInterval: parseInt(process.env.YOUTUBE_POLL_INTERVAL_MS || '30000'),
+    pollInterval: parseInt(process.env.YOUTUBE_POLL_INTERVAL_MS || '5000'),
   },
   kick: {
     enabled: !!(process.env.KICK_CHANNEL_NAME),
@@ -697,8 +697,8 @@ async function youtubePoll() {
       broadcast('youtube', author.displayName, text, null, badges);
     }
 
-    // Respect YouTube's requested interval, minimum 30s to preserve quota
-    const pollIn = Math.max(data.pollingIntervalMillis || config.youtube.pollInterval, 30000);
+    // Use YouTube's suggested interval, minimum 5s (safe with OAuth)
+    const pollIn = Math.max(data.pollingIntervalMillis || config.youtube.pollInterval, 5000);
     youtubePollTimer = setTimeout(youtubePoll, pollIn);
 
   } catch (err) {
