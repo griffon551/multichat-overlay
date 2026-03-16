@@ -595,6 +595,7 @@ async function youtubePoll() {
         text = runs.map(run => {
           if (run.text) return escapeHtmlYT(run.text);
           if (run.emoji) {
+            console.log('[YouTube] emoji object:', JSON.stringify(run.emoji).substring(0, 500));
             // Prefer highest-res thumbnail
             const img = run.emoji.image?.thumbnails?.slice(-1)[0]?.url
                      || run.emoji.image?.thumbnails?.[0]?.url;
@@ -609,6 +610,7 @@ async function youtubePoll() {
           return '';
         }).join('');
       } else {
+        console.log('[YouTube] no runs, snippet:', JSON.stringify(item.snippet).substring(0, 400));
         // No runs = API key mode, fall back to shortcode parsing
         text = parseYouTubeEmoji(escapeHtmlYT(item.snippet?.displayMessage || ''));
       }
