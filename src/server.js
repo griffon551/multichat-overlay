@@ -73,38 +73,34 @@ const TEXT_EMOTICONS = [
   [/B\)/g,  '😎'],
   [/o_o/gi, '😶'],
   [/:\|/g,  '😐'],
+  [/:P/g,   '😛'], [/:-P/g,  '😛'],
+  [/:p/g,   '😛'], [/:-p/g,  '😛'],
 ];
 
 // Parse Joystick emotes: :emoteName: → <img>, and text emoticons → emoji
 function parseJoystickEmotes(text, payload) {
-  // Build emote lookup from any emote data in the payload
+  // Build emote lookup from emotesUsed array (code + signedUrl)
   const emoteMap = {};
-
-  // Joystick may send emotes as payload.emotes, payload.tokens, or similar
-  const sources = [
-    payload,
-    payload?.emotes,
-    payload?.tokens,
-    payload?.chatEmotes,
-  ].filter(Boolean);
-
-  for (const src of sources) {
-    if (Array.isArray(src)) {
-      src.forEach(e => {
-        const name = e.name || e.slug || e.token;
-        const url  = e.url  || e.image_url || e.imageUrl || e.src;
-        if (name && url) emoteMap[name] = url;
-      });
-    }
+  const emotesUsed = payload?.emotesUsed;
+  if (Array.isArray(emotesUsed)) {
+    emotesUsed.forEach(e => {
+      const code = e.code; // e.g. ":Griffon551hug:"
+      const url  = e.signedUrl || e.url;
+      if (code && url) emoteMap[code] = url; // store with colons as-is
+    });
   }
 
-  // Replace :emoteName: with image if we have a URL for it
-  text = text.replace(/:([\w]+):/g, (match, name) => {
-    if (emoteMap[name]) {
-      return `<img src="${emoteMap[name]}" style="height:1.4em;vertical-align:middle;display:inline-block;" alt="${name}">`;
-    }
-    return match; // leave unknown :tokens: alone
-  });
+  // Replace full :code: patterns (including surrounding colons) with images
+  // Sort longest first to avoid partial matches
+  Object.keys(emoteMap)
+    .sort((a, b) => b.length - a.length)
+    .forEach(code => {
+      const escaped = code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const name = code.replace(/:/g, '');
+      text = text.split(code).join(
+        `<img src="${emoteMap[code]}" style="height:1.4em;vertical-align:middle;display:inline-block;" alt="${name}">`
+      );
+    });
 
   // Convert text emoticons to Unicode
   TEXT_EMOTICONS.forEach(([pattern, emoji]) => {
@@ -673,7 +669,6 @@ function connectJoystick() {
       const payload = msg.message;
       if (!payload) return;
       if (payload.event === 'ChatMessage' && payload.type === 'new_message') {
-        console.log('[Joystick] RAW PAYLOAD:', JSON.stringify(payload).substring(0, 500));
         const username = payload.author?.username || 'Unknown';
         const rawText = payload.text || '';
         const color = payload.author?.usernameColor || null;
