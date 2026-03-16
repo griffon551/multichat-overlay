@@ -685,7 +685,6 @@ async function youtubePoll() {
           return '';
         }).join('');
       } else {
-        console.log('[YouTube] no runs, snippet:', JSON.stringify(item.snippet).substring(0, 400));
         // No runs = API key mode, fall back to shortcode parsing
         text = parseYouTubeEmoji(escapeHtmlYT(item.snippet?.displayMessage || ''));
       }
