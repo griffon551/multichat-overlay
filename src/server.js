@@ -61,7 +61,7 @@ function parseKickEmotes(text) {
 // Text emoticons → Unicode emoji
 const TEXT_EMOTICONS = [
   [/:\)/g,  '🙂'], [/:-\)/g, '🙂'],
-  [/:\(/g,  '😞'], [/:-(\)/g,'😞'],
+  [/:\(/g,  '😞'], [/:-\(/g, '😞'],
   [/;\)/g,  '😉'], [/;-\)/g, '😉'],
   [/:D/g,   '😄'], [/:-D/g,  '😄'],
   [/xD/gi,  '😆'],
