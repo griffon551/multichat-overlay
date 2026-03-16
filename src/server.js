@@ -486,7 +486,8 @@ async function refreshYoutubeToken() {
 }
 
 function getYoutubeRedirectUri(host) {
-  return process.env.YOUTUBE_REDIRECT_URL || `http://${host}/youtube/callback`;
+  // Desktop app OAuth credentials use http://localhost — user pastes the redirect URL manually
+  return process.env.YOUTUBE_REDIRECT_URL || 'http://localhost:3030/youtube/callback';
 }
 
 let youtubeActive    = false;
@@ -945,11 +946,10 @@ app.get('/youtube/manual', (req, res) => {
     button{padding:10px 20px;background:#FF0000;color:white;border:none;border-radius:4px;cursor:pointer;}</style>
     <h2>🔴 YouTube OAuth Setup</h2>
     <ol>
-      <li>In <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a>, create an <strong>OAuth 2.0 Client ID</strong> (type: Web application)</li>
-      <li>Add <code>${redirectUri}</code> as an Authorized Redirect URI</li>
-      <li>Set <code>YOUTUBE_CLIENT_ID</code> and <code>YOUTUBE_CLIENT_SECRET</code> in Dockge and restart</li>
+      <li>In <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a>, create an <strong>OAuth 2.0 Client ID</strong> (type: <strong>Desktop app</strong>)</li>
+      <li>Set <code>YOUTUBE_CLIENT_ID</code>, <code>YOUTUBE_CLIENT_SECRET</code>, and <code>YOUTUBE_REDIRECT_URL=http://localhost:3030/youtube/callback</code> in Dockge and restart</li>
       <li>On your PC, <a href="/youtube/auth">click here to start the Google auth flow</a></li>
-      <li>Google will redirect to <code>${redirectUri}?code=...</code> — if it doesn't load, copy the full URL and paste below</li>
+      <li>Google will redirect your browser to <code>http://localhost:3030/youtube/callback?code=...</code> — that page won't load, copy the full URL from your address bar and paste below</li>
     </ol>
     <input type="text" id="url" placeholder="${redirectUri}?code=4/0ABC..." />
     <button onclick="submitUrl()">Submit</button>
