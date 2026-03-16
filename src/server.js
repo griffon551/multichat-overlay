@@ -51,6 +51,28 @@ function broadcast(platform, username, message, color, badges) {
   io.emit('chat_message', payload);
 }
 
+// Parse Kick emotes: [emote:ID:name] → <img>
+function parseKickEmotes(text) {
+  return text.replace(/\[emote:(\d+):([^\]]+)\]/g, (_, id, name) => {
+    return `<img src="https://files.kick.com/emotes/${id}/fullsize" style="height:1.4em;vertical-align:middle;display:inline-block;" alt="${name}">`;
+  });
+}
+
+// Parse Joystick emotes: :emoteName: → <img> (uses their CDN)
+function parseJoystickEmotes(text, emotes) {
+  // Joystick sends an emotes array alongside the message
+  if (emotes && Array.isArray(emotes)) {
+    emotes.forEach(e => {
+      if (!e.name || !e.url) return;
+      const escaped = e.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      text = text.replace(new RegExp(`:${escaped}:`, 'g'),
+        `<img src="${e.url}" style="height:1.4em;vertical-align:middle;display:inline-block;" alt="${e.name}">`);
+    });
+  }
+  // Fallback: :word: pattern with no known URL — leave as-is (or strip colons)
+  return text;
+}
+
 // ─── TWITCH ──────────────────────────────────────────────────────────────────
 let twitchAccessToken = config.twitch.accessToken;
 let twitchRefreshToken = config.twitch.refreshToken;
@@ -530,9 +552,10 @@ function connectKickWebSocket(chatroomId, pusherKey) {
       if (msg.event === 'App\\Events\\ChatMessageEvent') {
         const data = typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data;
         const username = data?.sender?.username || data?.sender?.slug || 'Unknown';
-        const text = data?.content || '';
+        const rawText = data?.content || '';
         const color = data?.sender?.identity?.color || null;
         const badges = (data?.sender?.identity?.badges || []).map(b => b.type);
+        const text = parseKickEmotes(rawText);
         if (text) broadcast('kick', username, text, color, badges);
       }
     } catch (e) { /* ignore parse errors */ }
@@ -610,12 +633,13 @@ function connectJoystick() {
       if (!payload) return;
       if (payload.event === 'ChatMessage' && payload.type === 'new_message') {
         const username = payload.author?.username || 'Unknown';
-        const text = payload.text || '';
+        const rawText = payload.text || '';
         const color = payload.author?.usernameColor || null;
         const badges = [];
         if (payload.author?.isStreamer) badges.push('streamer');
         if (payload.author?.isModerator) badges.push('moderator');
         if (payload.author?.isSubscriber) badges.push('subscriber');
+        const text = parseJoystickEmotes(rawText, payload.emotes || payload.author?.emotes);
         if (text) broadcast('joystick', username, text, color, badges);
       }
     } catch (e) { /* ignore */ }
