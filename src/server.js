@@ -554,7 +554,7 @@ async function youtubePoll() {
           return '';
         }).join('');
       } else {
-        console.log('[YouTube] no runs, using displayMessage:', item.snippet?.displayMessage);
+        console.log('[YouTube] no runs, full snippet:', JSON.stringify(item.snippet).substring(0, 800));
         // Fallback to displayMessage with shortcode parsing
         text = parseYouTubeEmoji(escapeHtmlYT(item.snippet?.displayMessage || ''));
       }
