@@ -131,9 +131,63 @@
   @keyframes fadeOut {
     to { opacity: 0; transform: translateX(-10px); height: 0; padding: 0; margin: 0; }
   }
+
+  /* Platform status indicator */
+  #status-bar {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    align-items: flex-end;
+    font-family: var(--font);
+    pointer-events: none;
+  }
+  .status-pill {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+    animation: slideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    transition: opacity 0.3s;
+  }
+  .status-pill .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .status-pill.reconnecting { background: rgba(0,0,0,0.6); color: #FFB700; }
+  .status-pill.reconnecting .dot { background: #FFB700; animation: pulse 1s infinite; }
+  .status-pill.disconnected { background: rgba(0,0,0,0.6); color: #FF4444; }
+  .status-pill.disconnected .dot { background: #FF4444; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* System message in chat */
+  .msg-system {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    font-family: var(--font);
+    font-size: 13px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.5);
+    text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+    animation: slideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
 </style>
 </head>
 <body>
+<div id="status-bar"></div>
 <div id="chat"></div>
 
 <script>
@@ -215,11 +269,59 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+// Platform status indicator
+const statusBar = document.getElementById('status-bar');
+const statusPills = {}; // platform → pill element
+
+const PLATFORM_NAMES = { youtube: 'YouTube', twitch: 'Twitch', kick: 'Kick', joystick: 'Joystick' };
+
+function updateStatusPill(platform, state, message) {
+  if (state === 'connected') {
+    // Remove pill on connect
+    if (statusPills[platform]) {
+      statusPills[platform].remove();
+      delete statusPills[platform];
+    }
+    return;
+  }
+
+  // Create or update pill
+  if (!statusPills[platform]) {
+    const pill = document.createElement('div');
+    pill.className = `status-pill ${state}`;
+    statusPills[platform] = pill;
+    statusBar.appendChild(pill);
+  }
+  const pill = statusPills[platform];
+  pill.className = `status-pill ${state}`;
+  const label = message || (state === 'reconnecting' ? 'Reconnecting...' : 'Disconnected');
+  pill.innerHTML = `<span class="dot"></span>${PLATFORM_NAMES[platform] || platform}: ${label}`;
+
+  // Also post a system message in chat
+  addSystemMessage(platform, state, label);
+}
+
+function addSystemMessage(platform, state, label) {
+  const msgs = chat.querySelectorAll('.msg, .msg-system');
+  if (msgs.length >= MAX_MESSAGES) msgs[msgs.length - 1].remove();
+  const div = document.createElement('div');
+  div.className = 'msg-system';
+  const icon = state === 'reconnecting' ? '⚠️' : '❌';
+  div.textContent = `${icon} ${PLATFORM_NAMES[platform] || platform} ${label}`;
+  chat.prepend(div);
+  // Auto-remove system messages after 10s
+  setTimeout(() => div.remove(), 10000);
+}
+
 // Connect to backend socket
 const socket = io();
 
 socket.on('chat_message', (data) => {
   addMessage(data);
+});
+
+socket.on('platform_status', ({ platform, state, message }) => {
+  updateStatusPill(platform, state, message);
 });
 
 socket.on('connect', () => console.log('Connected to MultiChat server'));
