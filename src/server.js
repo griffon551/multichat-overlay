@@ -24,11 +24,15 @@ const config = {
     botUsername: process.env.TWITCH_BOT_USERNAME || null,
   },
   youtube: {
-    enabled: !!(process.env.YOUTUBE_API_KEY && (process.env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_LIVE_VIDEO_ID)),
-    apiKey: process.env.YOUTUBE_API_KEY,
-    channelId: process.env.YOUTUBE_CHANNEL_ID || null,   // preferred — auto-detects live stream
-    videoId: process.env.YOUTUBE_LIVE_VIDEO_ID || null,  // optional override for a specific stream
-    pollInterval: parseInt(process.env.YOUTUBE_POLL_INTERVAL_MS || '5000'),
+    enabled: !!((process.env.YOUTUBE_API_KEY || process.env.YOUTUBE_ACCESS_TOKEN) && (process.env.YOUTUBE_CHANNEL_ID || process.env.YOUTUBE_LIVE_VIDEO_ID)),
+    apiKey: process.env.YOUTUBE_API_KEY || null,           // legacy API key (no emoji images)
+    clientId: process.env.YOUTUBE_CLIENT_ID || null,       // OAuth client ID
+    clientSecret: process.env.YOUTUBE_CLIENT_SECRET || null,
+    accessToken: process.env.YOUTUBE_ACCESS_TOKEN || null,
+    refreshToken: process.env.YOUTUBE_REFRESH_TOKEN || null,
+    channelId: process.env.YOUTUBE_CHANNEL_ID || null,
+    videoId: process.env.YOUTUBE_LIVE_VIDEO_ID || null,
+    pollInterval: parseInt(process.env.YOUTUBE_POLL_INTERVAL_MS || '30000'),
   },
   kick: {
     enabled: !!(process.env.KICK_CHANNEL_NAME),
@@ -441,8 +445,49 @@ TWITCH_BOT_USERNAME=${twitchUsername || ''}
 }
 
 // ─── YOUTUBE ─────────────────────────────────────────────────────────────────
-const YOUTUBE_TIMEOUT_MS  = 15 * 60 * 1000; // 15 minutes
-const YOUTUBE_RECONNECT_DELAY = 10 * 1000;  // 10s reconnect on transient error
+const YOUTUBE_TIMEOUT_MS      = 15 * 60 * 1000;
+const YOUTUBE_RECONNECT_DELAY = 10 * 1000;
+
+let youtubeAccessToken  = config.youtube.accessToken;
+let youtubeRefreshToken = config.youtube.refreshToken;
+
+// Returns auth header — OAuth bearer if available, else API key param
+function youtubeAuthHeader() {
+  if (youtubeAccessToken) return { header: { 'Authorization': `Bearer ${youtubeAccessToken}` }, param: '' };
+  if (config.youtube.apiKey) return { header: {}, param: `&key=${config.youtube.apiKey}` };
+  return null;
+}
+
+async function refreshYoutubeToken() {
+  if (!youtubeRefreshToken || !config.youtube.clientId || !config.youtube.clientSecret) return false;
+  try {
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id:     config.youtube.clientId,
+        client_secret: config.youtube.clientSecret,
+        refresh_token: youtubeRefreshToken,
+        grant_type:    'refresh_token',
+      }),
+    });
+    const data = await res.json();
+    if (data.access_token) {
+      youtubeAccessToken = data.access_token;
+      console.log('[YouTube] Token refreshed');
+      return true;
+    }
+    console.error('[YouTube] Token refresh failed:', data.error);
+    return false;
+  } catch (err) {
+    console.error('[YouTube] Token refresh error:', err.message);
+    return false;
+  }
+}
+
+function getYoutubeRedirectUri(host) {
+  return process.env.YOUTUBE_REDIRECT_URL || `http://${host}/youtube/callback`;
+}
 
 let youtubeActive    = false;
 let youtubePollTimer = null;
@@ -461,20 +506,23 @@ function youtubeReset(reason) {
 }
 
 async function youtubeGetLiveChatId() {
+  const auth = youtubeAuthHeader();
+  if (!auth) { console.error('[YouTube] No API key or OAuth token configured'); return null; }
   if (config.youtube.videoId) {
-    const url = `https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${config.youtube.videoId}&key=${config.youtube.apiKey}`;
-    const res  = await fetch(url);
+    const url = `https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${config.youtube.videoId}${auth.param}`;
+    const res  = await fetch(url, { headers: auth.header });
     const data = await res.json();
+    if (data.error?.code === 401) { await refreshYoutubeToken(); return youtubeGetLiveChatId(); }
     return data.items?.[0]?.liveStreamingDetails?.activeLiveChatId || null;
   } else {
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${config.youtube.channelId}&eventType=live&type=video&key=${config.youtube.apiKey}`;
-    const res  = await fetch(url);
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${config.youtube.channelId}&eventType=live&type=video${auth.param}`;
+    const res  = await fetch(url, { headers: auth.header });
     const data = await res.json();
     if (data.error) { console.error('[YouTube] Search API error:', data.error.message); return null; }
     const videoId = data.items?.[0]?.id?.videoId;
     if (!videoId) return null;
     console.log('[YouTube] Found live stream:', videoId);
-    const vRes  = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${videoId}&key=${config.youtube.apiKey}`);
+    const vRes  = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${videoId}${auth.param}`, { headers: auth.header });
     const vData = await vRes.json();
     return vData.items?.[0]?.liveStreamingDetails?.activeLiveChatId || null;
   }
@@ -494,10 +542,12 @@ async function youtubePoll() {
       console.log('[YouTube] Connected to live chat:', youtubeLiveChatId);
     }
 
-    let url = `https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${youtubeLiveChatId}&part=snippet,authorDetails,id&key=${config.youtube.apiKey}`;
+    const auth = youtubeAuthHeader();
+    if (!auth) { console.error('[YouTube] No auth available'); youtubePollTimer = setTimeout(youtubePoll, 60000); return; }
+    let url = `https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${youtubeLiveChatId}&part=snippet,authorDetails,id${auth.param}`;
     if (youtubeNextToken) url += `&pageToken=${youtubeNextToken}`;
 
-    const res  = await fetch(url);
+    const res  = await fetch(url, { headers: auth.header });
     const data = await res.json();
 
     if (data.error) {
@@ -505,20 +555,26 @@ async function youtubePoll() {
       const msg  = data.error.message || '';
       console.error('[YouTube] API Error:', msg);
 
+      if (code === 401) {
+        console.log('[YouTube] Token expired, refreshing...');
+        const refreshed = await refreshYoutubeToken();
+        if (refreshed) { youtubePollTimer = setTimeout(youtubePoll, 1000); return; }
+        console.error('[YouTube] Could not refresh token — visit /youtube/auth to re-authorize');
+        youtubeReset('auth failed');
+        return;
+      }
       if (msg.includes('quota')) {
         console.log('[YouTube] Quota exceeded — resetting. Re-trigger when ready.');
         youtubeReset('quota exceeded');
         return;
       }
       if (code === 403 || code === 404) {
-        // Stream ended — auto-reconnect after short delay in case of blip
         console.log('[YouTube] Chat unavailable, attempting reconnect in 10s...');
         youtubeLiveChatId = null;
         youtubeNextToken  = null;
         youtubePollTimer  = setTimeout(youtubePoll, YOUTUBE_RECONNECT_DELAY);
         return;
       }
-      // Other transient error — retry
       youtubePollTimer = setTimeout(youtubePoll, YOUTUBE_RECONNECT_DELAY);
       return;
     }
@@ -538,24 +594,21 @@ async function youtubePoll() {
         text = runs.map(run => {
           if (run.text) return escapeHtmlYT(run.text);
           if (run.emoji) {
-            console.log('[YouTube] emoji run:', JSON.stringify(run.emoji).substring(0, 300));
-            // Try to get the image URL from the emoji object
-            const img = run.emoji.image?.thumbnails?.[0]?.url
-                     || run.emoji.image?.thumbnails?.[1]?.url;
+            // Prefer highest-res thumbnail
+            const img = run.emoji.image?.thumbnails?.slice(-1)[0]?.url
+                     || run.emoji.image?.thumbnails?.[0]?.url;
             const label = run.emoji.shortcuts?.[0] || run.emoji.emojiId || '';
             const altText = label.replace(/:/g, '');
             if (img) {
               return `<img src="${img}" style="height:1.4em;vertical-align:middle;display:inline-block;" alt="${altText}">`;
             }
-            // Fallback: try our shortcode map
             if (label) return parseYouTubeEmoji(label);
             return '';
           }
           return '';
         }).join('');
       } else {
-        console.log('[YouTube] no runs, full snippet:', JSON.stringify(item.snippet).substring(0, 800));
-        // Fallback to displayMessage with shortcode parsing
+        // No runs = API key mode, fall back to shortcode parsing
         text = parseYouTubeEmoji(escapeHtmlYT(item.snippet?.displayMessage || ''));
       }
       if (!text) continue;
@@ -854,6 +907,108 @@ JOYSTICK_REFRESH_TOKEN=${data.refresh_token}
   }
 });
 
+// ─── YouTube OAuth routes ────────────────────────────────────────────────────
+app.get('/youtube/auth', (req, res) => {
+  if (!config.youtube.clientId) return res.send('<h2>❌ YOUTUBE_CLIENT_ID not set in env</h2>');
+  const redirectUri = getYoutubeRedirectUri(req.headers.host);
+  const params = new URLSearchParams({
+    client_id:     config.youtube.clientId,
+    redirect_uri:  redirectUri,
+    response_type: 'code',
+    scope:         'https://www.googleapis.com/auth/youtube.readonly',
+    access_type:   'offline',
+    prompt:        'consent',
+  });
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+});
+
+app.get('/youtube/callback', async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.send('No code received');
+  await exchangeYoutubeCode(code, getYoutubeRedirectUri(req.headers.host), res);
+});
+
+app.get('/youtube/manual', (req, res) => {
+  const redirectUri = getYoutubeRedirectUri(req.headers.host);
+  const authUrl = new URLSearchParams({
+    client_id:     config.youtube.clientId || 'YOUR_CLIENT_ID',
+    redirect_uri:  redirectUri,
+    response_type: 'code',
+    scope:         'https://www.googleapis.com/auth/youtube.readonly',
+    access_type:   'offline',
+    prompt:        'consent',
+  });
+  res.send(`
+    <style>body{font-family:sans-serif;max-width:700px;margin:40px auto;padding:20px;background:#111;color:#eee;}
+    a{color:#FF0000;} pre{background:#1a1a1a;padding:12px;border-radius:6px;overflow-x:auto;}
+    input{width:100%;padding:8px;margin:8px 0;background:#222;color:#eee;border:1px solid #444;border-radius:4px;}
+    button{padding:10px 20px;background:#FF0000;color:white;border:none;border-radius:4px;cursor:pointer;}</style>
+    <h2>🔴 YouTube OAuth Setup</h2>
+    <ol>
+      <li>In <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a>, create an <strong>OAuth 2.0 Client ID</strong> (type: Web application)</li>
+      <li>Add <code>${redirectUri}</code> as an Authorized Redirect URI</li>
+      <li>Set <code>YOUTUBE_CLIENT_ID</code> and <code>YOUTUBE_CLIENT_SECRET</code> in Dockge and restart</li>
+      <li>On your PC, <a href="/youtube/auth">click here to start the Google auth flow</a></li>
+      <li>Google will redirect to <code>${redirectUri}?code=...</code> — if it doesn't load, copy the full URL and paste below</li>
+    </ol>
+    <input type="text" id="url" placeholder="${redirectUri}?code=4/0ABC..." />
+    <button onclick="submitUrl()">Submit</button>
+    <div id="result"></div>
+    <script>
+    async function submitUrl() {
+      const url = document.getElementById('url').value.trim();
+      const code = new URL(url).searchParams.get('code');
+      if (!code) { document.getElementById('result').innerHTML = '❌ No code found in URL'; return; }
+      const res = await fetch('/youtube/exchange?code=' + encodeURIComponent(code));
+      const text = await res.text();
+      document.getElementById('result').innerHTML = text;
+    }
+    </script>
+  `);
+});
+
+app.get('/youtube/exchange', async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.send('No code');
+  await exchangeYoutubeCode(code, getYoutubeRedirectUri(req.headers.host), res);
+});
+
+async function exchangeYoutubeCode(code, redirectUri, res) {
+  try {
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id:     config.youtube.clientId,
+        client_secret: config.youtube.clientSecret,
+        code,
+        grant_type:    'authorization_code',
+        redirect_uri:  redirectUri,
+      }),
+    });
+    const data = await tokenRes.json();
+    if (data.access_token) {
+      youtubeAccessToken  = data.access_token;
+      youtubeRefreshToken = data.refresh_token || youtubeRefreshToken;
+      res.send(`
+        <style>body{font-family:sans-serif;max-width:700px;margin:40px auto;padding:20px;background:#111;color:#eee;}
+        pre{background:#1a1a1a;padding:12px;border-radius:6px;overflow-x:auto;}</style>
+        <h2>✅ YouTube Authorized!</h2>
+        <p>Add these to your docker-compose.yml and restart:</p>
+        <pre>
+YOUTUBE_ACCESS_TOKEN=${data.access_token}
+YOUTUBE_REFRESH_TOKEN=${data.refresh_token || '(not returned — keep existing)'}
+        </pre>
+        <p>You can now remove <code>YOUTUBE_API_KEY</code> if you wish — OAuth gives better emoji support.</p>
+      `);
+    } else {
+      res.send('<h2>❌ Authorization failed</h2><pre>' + JSON.stringify(data, null, 2) + '</pre>');
+    }
+  } catch (err) {
+    res.send('Error: ' + err.message);
+  }
+}
+
 // ─── Streamer.bot webhooks — start / reset YouTube ───────────────────────────
 // Start: call at stream begin  →  GET http://SERVER:3030/youtube/start
 // Reset: call at stream end    →  GET http://SERVER:3030/youtube/reset
@@ -902,6 +1057,7 @@ server.listen(PORT, () => {
   console.log(`   Browser source:  http://localhost:${PORT}/`);
   console.log(`   Status:          http://localhost:${PORT}/status`);
   console.log(`   Twitch auth:     http://localhost:${PORT}/twitch/auth`);
+  console.log(`   YouTube auth:    http://localhost:${PORT}/youtube/manual`);
   console.log(`   Joystick auth:   http://localhost:${PORT}/joystick/auth\n`);
 
   connectTwitch();
