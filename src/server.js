@@ -55,6 +55,12 @@ function broadcast(platform, username, message, color, badges) {
   io.emit('chat_message', payload);
 }
 
+// Emit platform connection status to overlay
+// state: 'connected' | 'reconnecting' | 'disconnected'
+function broadcastStatus(platform, state, message) {
+  io.emit('platform_status', { platform, state, message: message || '' });
+}
+
 // Parse Kick emotes: [emote:ID:name] → <img>
 function parseKickEmotes(text) {
   return text.replace(/\[emote:(\d+):([^\]]+)\]/g, (_, id, name) => {
@@ -478,8 +484,8 @@ TWITCH_BOT_USERNAME=${twitchUsername || ''}
 }
 
 // ─── YOUTUBE ─────────────────────────────────────────────────────────────────
-const YOUTUBE_TIMEOUT_MS      = 15 * 60 * 1000;
-const YOUTUBE_RECONNECT_DELAY = 10 * 1000;
+const YOUTUBE_RECONNECT_DELAY  = 10 * 1000;       // 10s between reconnect attempts
+const YOUTUBE_RECONNECT_TIMEOUT = 8 * 60 * 1000;  // give up after 8min of failed reconnects
 
 let youtubeAccessToken  = config.youtube.accessToken;
 let youtubeRefreshToken = config.youtube.refreshToken;
@@ -523,43 +529,73 @@ function getYoutubeRedirectUri(host) {
   return process.env.YOUTUBE_REDIRECT_URL || 'http://localhost:3030/youtube/callback';
 }
 
-let youtubeActive    = false;
-let youtubePollTimer = null;
-let youtubeExpireTimer = null;
-let youtubeLiveChatId  = null;
-let youtubeNextToken   = null;
-const youtubeSeenIds   = new Set();
+let youtubeActive          = false;
+let youtubePollTimer       = null;
+let youtubeReconnectTimer  = null; // tracks how long we've been trying to reconnect
+let youtubeLiveChatId      = null;
+let youtubeCachedVideoId   = null; // cached after first search — reused on reconnect
+let youtubeNextToken       = null;
+const youtubeSeenIds       = new Set();
 
 function youtubeReset(reason) {
-  console.log(`[YouTube] Reset: ${reason}`);
-  youtubeActive = false;
-  youtubeLiveChatId = null;
-  youtubeNextToken  = null;
-  if (youtubePollTimer)   { clearTimeout(youtubePollTimer);   youtubePollTimer   = null; }
-  if (youtubeExpireTimer) { clearTimeout(youtubeExpireTimer); youtubeExpireTimer = null; }
+  console.log(`[YouTube] Reset: ${reason} — waiting for Streamer.bot to re-trigger`);
+  broadcastStatus('youtube', 'disconnected', '');
+  youtubeActive        = false;
+  youtubeLiveChatId    = null;
+  youtubeCachedVideoId = null; // clear cache so next start does a fresh search
+  youtubeNextToken     = null;
+  if (youtubePollTimer)      { clearTimeout(youtubePollTimer);      youtubePollTimer      = null; }
+  if (youtubeReconnectTimer) { clearTimeout(youtubeReconnectTimer); youtubeReconnectTimer = null; }
+}
+
+function youtubeStartReconnectTimeout() {
+  // Start the 15-min countdown only when we lose connection (not on initial connect)
+  if (youtubeReconnectTimer) return; // already counting down
+  console.log('[YouTube] Lost connection — will keep retrying for 8 minutes...');
+  youtubeReconnectTimer = setTimeout(() => {
+    console.log('[YouTube] 8-minute reconnect timeout reached — giving up. Re-trigger via Streamer.bot.');
+    broadcastStatus('youtube', 'disconnected', 'Timed out — waiting for stream trigger');
+    youtubeReset('15-minute reconnect timeout');
+  }, YOUTUBE_RECONNECT_TIMEOUT);
+}
+
+function youtubeClearReconnectTimeout() {
+  // Cancel the countdown once we successfully reconnect
+  if (youtubeReconnectTimer) {
+    clearTimeout(youtubeReconnectTimer);
+    youtubeReconnectTimer = null;
+    console.log('[YouTube] Reconnected successfully');
+    broadcastStatus('youtube', 'connected', '');
+  }
 }
 
 async function youtubeGetLiveChatId() {
   const auth = youtubeAuthHeader();
   if (!auth) { console.error('[YouTube] No API key or OAuth token configured'); return null; }
-  if (config.youtube.videoId) {
-    const url = `https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${config.youtube.videoId}${auth.param}`;
+
+  // Use explicit video ID, or cached one from a previous search this session
+  const videoId = config.youtube.videoId || youtubeCachedVideoId;
+  if (videoId) {
+    const url = `https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${videoId}${auth.param}`;
     const res  = await fetch(url, { headers: auth.header });
     const data = await res.json();
     if (data.error?.code === 401) { await refreshYoutubeToken(); return youtubeGetLiveChatId(); }
     return data.items?.[0]?.liveStreamingDetails?.activeLiveChatId || null;
-  } else {
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${config.youtube.channelId}&eventType=live&type=video${auth.param}`;
-    const res  = await fetch(url, { headers: auth.header });
-    const data = await res.json();
-    if (data.error) { console.error('[YouTube] Search API error:', data.error.message); return null; }
-    const videoId = data.items?.[0]?.id?.videoId;
-    if (!videoId) return null;
-    console.log('[YouTube] Found live stream:', videoId);
-    const vRes  = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${videoId}${auth.param}`, { headers: auth.header });
-    const vData = await vRes.json();
-    return vData.items?.[0]?.liveStreamingDetails?.activeLiveChatId || null;
   }
+
+  // No video ID — search for active stream (costs 100 quota units, only done once per session)
+  console.log('[YouTube] Searching for active live stream (1 quota search)...');
+  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${config.youtube.channelId}&eventType=live&type=video${auth.param}`;
+  const res  = await fetch(url, { headers: auth.header });
+  const data = await res.json();
+  if (data.error) { console.error('[YouTube] Search API error:', data.error.message); return null; }
+  const foundId = data.items?.[0]?.id?.videoId;
+  if (!foundId) return null;
+  youtubeCachedVideoId = foundId; // cache it — won't search again this session
+  console.log('[YouTube] Found live stream:', foundId, '(cached for this session)');
+  const vRes  = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${foundId}${auth.param}`, { headers: auth.header });
+  const vData = await vRes.json();
+  return vData.items?.[0]?.liveStreamingDetails?.activeLiveChatId || null;
 }
 
 async function youtubePoll() {
@@ -570,10 +606,13 @@ async function youtubePoll() {
       youtubeLiveChatId = await youtubeGetLiveChatId();
       if (!youtubeLiveChatId) {
         console.log('[YouTube] No active live stream found, retrying in 30s...');
+        youtubeStartReconnectTimeout(); // start 15min countdown
         youtubePollTimer = setTimeout(youtubePoll, 30000);
         return;
       }
+      youtubeClearReconnectTimeout(); // connected — cancel any countdown
       console.log('[YouTube] Connected to live chat:', youtubeLiveChatId);
+      broadcastStatus('youtube', 'connected', '');
     }
 
     const auth = youtubeAuthHeader();
@@ -604,11 +643,13 @@ async function youtubePoll() {
       }
       if (code === 403 || code === 404) {
         console.log('[YouTube] Chat unavailable, attempting reconnect in 10s...');
-        youtubeLiveChatId = null;
+        youtubeLiveChatId = null; // clear chat ID but keep cachedVideoId
         youtubeNextToken  = null;
+        youtubeStartReconnectTimeout(); // start/continue 15min countdown
         youtubePollTimer  = setTimeout(youtubePoll, YOUTUBE_RECONNECT_DELAY);
         return;
       }
+      youtubeStartReconnectTimeout();
       youtubePollTimer = setTimeout(youtubePoll, YOUTUBE_RECONNECT_DELAY);
       return;
     }
@@ -661,7 +702,10 @@ async function youtubePoll() {
 
   } catch (err) {
     console.error('[YouTube] Error:', err.message);
-    if (youtubeActive) youtubePollTimer = setTimeout(youtubePoll, YOUTUBE_RECONNECT_DELAY);
+    if (youtubeActive) {
+      youtubeStartReconnectTimeout();
+      youtubePollTimer = setTimeout(youtubePoll, YOUTUBE_RECONNECT_DELAY);
+    }
   }
 }
 
@@ -674,13 +718,6 @@ function connectYoutube(manual = false) {
   const authMode = youtubeAccessToken ? 'OAuth ✓' : (config.youtube.apiKey ? 'API key (no emoji images)' : 'NO AUTH');
   console.log(`[YouTube] ${manual ? 'Manual trigger' : 'Auto-start'} — connecting... [auth: ${authMode}]`);
   youtubeActive = true;
-
-  // 15-minute auto-expire timeout
-  youtubeExpireTimer = setTimeout(() => {
-    console.log('[YouTube] 15-minute timeout reached — resetting. Re-trigger to reconnect.');
-    youtubeReset('15-minute timeout');
-  }, YOUTUBE_TIMEOUT_MS);
-
   youtubePoll();
 }
 
@@ -1097,7 +1134,7 @@ server.listen(PORT, () => {
   console.log(`   Joystick auth:   http://localhost:${PORT}/joystick/auth\n`);
 
   connectTwitch();
-  if (!process.env.YOUTUBE_STREAMERBOT_TRIGGER) connectYoutube(); // auto-start unless manual trigger mode
+  if (!process.env.YOUTUBE_STREAMERBOT_TRIGGER) connectYoutube(); // skip auto-start if Streamer.bot trigger mode enabled
   connectKick();
   connectJoystick();
 });
