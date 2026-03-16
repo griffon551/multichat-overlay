@@ -110,6 +110,90 @@ function parseJoystickEmotes(text, payload) {
   return text;
 }
 
+
+// YouTube emoji shortcodes → Unicode
+// YouTube sends custom emoji as :shortcode-name: in displayMessage
+const YOUTUBE_EMOJI = {
+  // Faces
+  'face-blue-smiling': '🙂','face-green-smiling': '🙂','face-red-smiling': '🙂',
+  'face-pink-smiling': '🙂','face-purple-smiling': '🙂','face-teal-smiling': '🙂',
+  'face-yellow-smiling': '🙂','face-orange-smiling': '🙂','face-fuchsia-smiling': '🙂',
+  'face-blue-tongue-out': '😛','face-green-tongue-out': '😛','face-red-tongue-out': '😛',
+  'face-pink-tongue-out': '😛','face-purple-tongue-out': '😛','face-teal-tongue-out': '😛',
+  'face-yellow-tongue-out': '😛','face-orange-tongue-out': '😛','face-fuchsia-tongue-out': '😛',
+  'face-blue-winking': '😉','face-green-winking': '😉','face-red-winking': '😉',
+  'face-pink-winking': '😉','face-purple-winking': '😉','face-teal-winking': '😉',
+  'face-yellow-winking': '😉','face-orange-winking': '😉','face-fuchsia-winking': '😉',
+  'face-blue-hearts': '🥰','face-green-hearts': '🥰','face-red-hearts': '🥰',
+  'face-pink-hearts': '🥰','face-purple-hearts': '🥰','face-teal-hearts': '🥰',
+  'face-yellow-hearts': '🥰','face-orange-hearts': '🥰','face-fuchsia-hearts': '🥰',
+  'face-blue-sunglasses': '😎','face-green-sunglasses': '😎','face-red-sunglasses': '😎',
+  'face-pink-sunglasses': '😎','face-purple-sunglasses': '😎','face-teal-sunglasses': '😎',
+  'face-yellow-sunglasses': '😎','face-orange-sunglasses': '😎','face-fuchsia-sunglasses': '😎',
+  'face-blue-crying': '😢','face-green-crying': '😢','face-red-crying': '😢',
+  'face-pink-crying': '😢','face-purple-crying': '😢','face-teal-crying': '😢',
+  'face-yellow-crying': '😢','face-orange-crying': '😢','face-fuchsia-crying': '😢',
+  'face-blue-angry': '😠','face-green-angry': '😠','face-red-angry': '😠',
+  'face-pink-angry': '😠','face-purple-angry': '😠','face-teal-angry': '😠',
+  'face-yellow-angry': '😠','face-orange-angry': '😠','face-fuchsia-angry': '😠',
+  'face-blue-surprised': '😮','face-green-surprised': '😮','face-red-surprised': '😮',
+  'face-pink-surprised': '😮','face-purple-surprised': '😮','face-teal-surprised': '😮',
+  'face-yellow-surprised': '😮','face-orange-surprised': '😮','face-fuchsia-surprised': '😮',
+  'face-blue-partying': '🥳','face-green-partying': '🥳','face-red-partying': '🥳',
+  'face-pink-partying': '🥳','face-purple-partying': '🥳','face-teal-partying': '🥳',
+  'face-yellow-partying': '🥳','face-orange-partying': '🥳','face-fuchsia-partying': '🥳',
+  'face-blue-laughing': '😂','face-green-laughing': '😂','face-red-laughing': '😂',
+  'face-pink-laughing': '😂','face-purple-laughing': '😂','face-teal-laughing': '😂',
+  'face-yellow-laughing': '😂','face-orange-laughing': '😂','face-fuchsia-laughing': '😂',
+  'face-blue-exploding': '🤯','face-green-exploding': '🤯','face-red-exploding': '🤯',
+  'face-pink-exploding': '🤯','face-purple-exploding': '🤯','face-teal-exploding': '🤯',
+  'face-yellow-exploding': '🤯','face-orange-exploding': '🤯','face-fuchsia-exploding': '🤯',
+  'face-blue-pleading': '🥺','face-green-pleading': '🥺','face-red-pleading': '🥺',
+  'face-pink-pleading': '🥺','face-purple-pleading': '🥺','face-teal-pleading': '🥺',
+  'face-yellow-pleading': '🥺','face-orange-pleading': '🥺','face-fuchsia-pleading': '🥺',
+  'face-blue-fire': '🔥','face-green-fire': '🔥','face-red-fire': '🔥',
+  'face-pink-fire': '🔥','face-purple-fire': '🔥','face-teal-fire': '🔥',
+  'face-yellow-fire': '🔥','face-orange-fire': '🔥','face-fuchsia-fire': '🔥',
+  // Hands / gestures
+  'hand-blue-clapping': '👏','hand-green-clapping': '👏','hand-red-clapping': '👏',
+  'hand-pink-clapping': '👏','hand-purple-clapping': '👏','hand-teal-clapping': '👏',
+  'hand-yellow-clapping': '👏','hand-orange-clapping': '👏','hand-fuchsia-clapping': '👏',
+  'hand-blue-thumbsup': '👍','hand-green-thumbsup': '👍','hand-red-thumbsup': '👍',
+  'hand-pink-thumbsup': '👍','hand-purple-thumbsup': '👍','hand-teal-thumbsup': '👍',
+  'hand-yellow-thumbsup': '👍','hand-orange-thumbsup': '👍','hand-fuchsia-thumbsup': '👍',
+  'hand-blue-waving': '👋','hand-green-waving': '👋','hand-red-waving': '👋',
+  'hand-pink-waving': '👋','hand-purple-waving': '👋','hand-teal-waving': '👋',
+  'hand-yellow-waving': '👋','hand-orange-waving': '👋','hand-fuchsia-waving': '👋',
+  'hand-blue-raised': '✋','hand-green-raised': '✋','hand-red-raised': '✋',
+  'hand-pink-raised': '✋','hand-purple-raised': '✋','hand-teal-raised': '✋',
+  'hand-yellow-raised': '✋','hand-orange-raised': '✋','hand-fuchsia-raised': '✋',
+  'hand-blue-heart': '🫶','hand-green-heart': '🫶','hand-red-heart': '🫶',
+  'hand-pink-heart': '🫶','hand-purple-heart': '🫶','hand-teal-heart': '🫶',
+  'hand-yellow-heart': '🫶','hand-orange-heart': '🫶','hand-fuchsia-heart': '🫶',
+  'hand-blue-ok': '👌','hand-green-ok': '👌','hand-red-ok': '👌',
+  'hand-pink-ok': '👌','hand-purple-ok': '👌','hand-teal-ok': '👌',
+  'hand-yellow-ok': '👌','hand-orange-ok': '👌','hand-fuchsia-ok': '👌',
+  'hand-blue-rockout': '🤘','hand-green-rockout': '🤘','hand-red-rockout': '🤘',
+  'hand-pink-rockout': '🤘','hand-purple-rockout': '🤘','hand-teal-rockout': '🤘',
+  'hand-yellow-rockout': '🤘','hand-orange-rockout': '🤘','hand-fuchsia-rockout': '🤘',
+  // Hearts / symbols
+  'heart-blue': '💙','heart-green': '💚','heart-red': '❤️',
+  'heart-pink': '🩷','heart-purple': '💜','heart-teal': '🩵',
+  'heart-yellow': '💛','heart-orange': '🧡','heart-fuchsia': '❤️',
+  // Fallback pattern — if color variant not in map, strip color word and try base
+};
+
+function parseYouTubeEmoji(text) {
+  return text.replace(/:([a-z0-9-]+):/g, (match, code) => {
+    if (YOUTUBE_EMOJI[code]) return YOUTUBE_EMOJI[code];
+    // Try stripping color suffix: face-fuchsia-tongue-out → face-tongue-out
+    const parts = code.split('-');
+    const colors = ['blue','green','red','pink','purple','teal','yellow','orange','fuchsia'];
+    const filtered = parts.filter(p => !colors.includes(p)).join('-');
+    if (YOUTUBE_EMOJI[filtered]) return YOUTUBE_EMOJI[filtered];
+    return match; // unknown shortcode, leave as-is
+  });
+}
 // ─── TWITCH ──────────────────────────────────────────────────────────────────
 let twitchAccessToken = config.twitch.accessToken;
 let twitchRefreshToken = config.twitch.refreshToken;
@@ -437,8 +521,9 @@ async function youtubePoll() {
       youtubeSeenIds.add(item.id);
       if (youtubeSeenIds.size > 500) { const first = youtubeSeenIds.values().next().value; youtubeSeenIds.delete(first); }
       const author = item.authorDetails;
-      const text   = item.snippet?.displayMessage;
-      if (!text) continue;
+      const rawText = item.snippet?.displayMessage;
+      if (!rawText) continue;
+      const text = parseYouTubeEmoji(rawText);
       const badges = [];
       if (author.isChatOwner)     badges.push('owner');
       if (author.isChatModerator) badges.push('moderator');
