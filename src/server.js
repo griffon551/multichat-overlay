@@ -58,18 +58,59 @@ function parseKickEmotes(text) {
   });
 }
 
-// Parse Joystick emotes: :emoteName: → <img> (uses their CDN)
-function parseJoystickEmotes(text, emotes) {
-  // Joystick sends an emotes array alongside the message
-  if (emotes && Array.isArray(emotes)) {
-    emotes.forEach(e => {
-      if (!e.name || !e.url) return;
-      const escaped = e.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      text = text.replace(new RegExp(`:${escaped}:`, 'g'),
-        `<img src="${e.url}" style="height:1.4em;vertical-align:middle;display:inline-block;" alt="${e.name}">`);
-    });
+// Text emoticons → Unicode emoji
+const TEXT_EMOTICONS = [
+  [/:\)/g,  '🙂'], [/:-\)/g, '🙂'],
+  [/:\(/g,  '😞'], [/:-(\)/g,'😞'],
+  [/;\)/g,  '😉'], [/;-\)/g, '😉'],
+  [/:D/g,   '😄'], [/:-D/g,  '😄'],
+  [/xD/gi,  '😆'],
+  [/<3/g,   '❤️'],
+  [/:o/gi,  '😮'], [/:-o/gi, '😮'],
+  [/:p/gi,  '😛'], [/:-p/gi, '😛'],
+  [/>:/g,   '😠'],
+  [/:\*/g,  '😘'],
+  [/B\)/g,  '😎'],
+  [/o_o/gi, '😶'],
+  [/:\|/g,  '😐'],
+];
+
+// Parse Joystick emotes: :emoteName: → <img>, and text emoticons → emoji
+function parseJoystickEmotes(text, payload) {
+  // Build emote lookup from any emote data in the payload
+  const emoteMap = {};
+
+  // Joystick may send emotes as payload.emotes, payload.tokens, or similar
+  const sources = [
+    payload,
+    payload?.emotes,
+    payload?.tokens,
+    payload?.chatEmotes,
+  ].filter(Boolean);
+
+  for (const src of sources) {
+    if (Array.isArray(src)) {
+      src.forEach(e => {
+        const name = e.name || e.slug || e.token;
+        const url  = e.url  || e.image_url || e.imageUrl || e.src;
+        if (name && url) emoteMap[name] = url;
+      });
+    }
   }
-  // Fallback: :word: pattern with no known URL — leave as-is (or strip colons)
+
+  // Replace :emoteName: with image if we have a URL for it
+  text = text.replace(/:([\w]+):/g, (match, name) => {
+    if (emoteMap[name]) {
+      return `<img src="${emoteMap[name]}" style="height:1.4em;vertical-align:middle;display:inline-block;" alt="${name}">`;
+    }
+    return match; // leave unknown :tokens: alone
+  });
+
+  // Convert text emoticons to Unicode
+  TEXT_EMOTICONS.forEach(([pattern, emoji]) => {
+    text = text.replace(pattern, emoji);
+  });
+
   return text;
 }
 
@@ -632,6 +673,7 @@ function connectJoystick() {
       const payload = msg.message;
       if (!payload) return;
       if (payload.event === 'ChatMessage' && payload.type === 'new_message') {
+        console.log('[Joystick] RAW PAYLOAD:', JSON.stringify(payload).substring(0, 500));
         const username = payload.author?.username || 'Unknown';
         const rawText = payload.text || '';
         const color = payload.author?.usernameColor || null;
@@ -639,7 +681,7 @@ function connectJoystick() {
         if (payload.author?.isStreamer) badges.push('streamer');
         if (payload.author?.isModerator) badges.push('moderator');
         if (payload.author?.isSubscriber) badges.push('subscriber');
-        const text = parseJoystickEmotes(rawText, payload.emotes || payload.author?.emotes);
+        const text = parseJoystickEmotes(rawText, payload);
         if (text) broadcast('joystick', username, text, color, badges);
       }
     } catch (e) { /* ignore */ }
