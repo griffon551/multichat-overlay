@@ -51,7 +51,8 @@ const config = {
 // ─── Broadcast helper ────────────────────────────────────────────────────────
 function broadcast(platform, username, message, color, badges) {
   const payload = { platform, username, message, color: color || null, badges: badges || [], ts: Date.now() };
-  console.log(`[${platform}] ${username}: ${message}`);
+  const logMsg = message.replace(/<[^>]+>/g, '[emote]');
+  console.log(`[${platform}] ${username}: ${logMsg}`);
   io.emit('chat_message', payload);
 }
 
