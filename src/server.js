@@ -636,7 +636,8 @@ function connectYoutube(manual = false) {
     console.log('[YouTube] Already active — resetting first');
     youtubeReset('re-triggered');
   }
-  console.log(`[YouTube] ${manual ? 'Manual trigger' : 'Auto-start'} — connecting...`);
+  const authMode = youtubeAccessToken ? 'OAuth ✓' : (config.youtube.apiKey ? 'API key (no emoji images)' : 'NO AUTH');
+  console.log(`[YouTube] ${manual ? 'Manual trigger' : 'Auto-start'} — connecting... [auth: ${authMode}]`);
   youtubeActive = true;
 
   // 15-minute auto-expire timeout
