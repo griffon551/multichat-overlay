@@ -28,15 +28,23 @@ services:
       TWITCH_BOT_USERNAME: ""
 
       # ── YOUTUBE ─────────────────────────────────────────────────────────────
-      # Get API key at: https://console.cloud.google.com (YouTube Data API v3)
+      # OAuth (recommended) — visit http://YOUR_IP:3030/youtube/manual to authorize
+      # Create OAuth 2.0 Client ID in Google Cloud Console (Web app type)
+      # Add http://YOUR_IP:3030/youtube/callback as Authorized Redirect URI
+      YOUTUBE_CLIENT_ID: ""
+      YOUTUBE_CLIENT_SECRET: ""
+      YOUTUBE_ACCESS_TOKEN: ""
+      YOUTUBE_REFRESH_TOKEN: ""
+      YOUTUBE_REDIRECT_URL: ""
+      # Channel/video — at least one required
       # Set YOUTUBE_CHANNEL_ID to auto-detect your live stream every time you go live
-      # Find your channel ID at: https://www.youtube.com/account_advanced
       # YOUTUBE_LIVE_VIDEO_ID is optional - only needed to force a specific stream
+      # Legacy API key fallback (no emoji images) — can remove once OAuth works
       YOUTUBE_API_KEY: ""
       YOUTUBE_CHANNEL_ID: ""
       YOUTUBE_LIVE_VIDEO_ID: ""
-      YOUTUBE_POLL_INTERVAL_MS: "5000"
-      # Set to "true" to disable auto-start and wait for Streamer.bot to trigger via GET /youtube/start
+      YOUTUBE_POLL_INTERVAL_MS: "30000"
+      # Set to "true" to wait for Streamer.bot /youtube/start instead of auto-starting
       YOUTUBE_STREAMERBOT_TRIGGER: ""
 
       # ── KICK ────────────────────────────────────────────────────────────────
