@@ -183,6 +183,14 @@ const YOUTUBE_EMOJI = {
   // Fallback pattern — if color variant not in map, strip color word and try base
 };
 
+function escapeHtmlYT(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 function parseYouTubeEmoji(text) {
   return text.replace(/:([a-z0-9-]+):/g, (match, code) => {
     if (YOUTUBE_EMOJI[code]) return YOUTUBE_EMOJI[code];
@@ -486,7 +494,7 @@ async function youtubePoll() {
       console.log('[YouTube] Connected to live chat:', youtubeLiveChatId);
     }
 
-    let url = `https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${youtubeLiveChatId}&part=snippet,authorDetails&key=${config.youtube.apiKey}`;
+    let url = `https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${youtubeLiveChatId}&part=snippet,authorDetails,id&key=${config.youtube.apiKey}`;
     if (youtubeNextToken) url += `&pageToken=${youtubeNextToken}`;
 
     const res  = await fetch(url);
@@ -521,9 +529,36 @@ async function youtubePoll() {
       youtubeSeenIds.add(item.id);
       if (youtubeSeenIds.size > 500) { const first = youtubeSeenIds.values().next().value; youtubeSeenIds.delete(first); }
       const author = item.authorDetails;
-      const rawText = item.snippet?.displayMessage;
-      if (!rawText) continue;
-      const text = parseYouTubeEmoji(rawText);
+      // Use structured messageText runs to get actual emoji image URLs
+      const runs = item.snippet?.textMessageDetails?.messageText?.runs
+                || item.snippet?.superChatDetails?.userComment?.runs
+                || null;
+      let text = '';
+      if (runs) {
+        text = runs.map(run => {
+          if (run.text) return escapeHtmlYT(run.text);
+          if (run.emoji) {
+            console.log('[YouTube] emoji run:', JSON.stringify(run.emoji).substring(0, 300));
+            // Try to get the image URL from the emoji object
+            const img = run.emoji.image?.thumbnails?.[0]?.url
+                     || run.emoji.image?.thumbnails?.[1]?.url;
+            const label = run.emoji.shortcuts?.[0] || run.emoji.emojiId || '';
+            const altText = label.replace(/:/g, '');
+            if (img) {
+              return `<img src="${img}" style="height:1.4em;vertical-align:middle;display:inline-block;" alt="${altText}">`;
+            }
+            // Fallback: try our shortcode map
+            if (label) return parseYouTubeEmoji(label);
+            return '';
+          }
+          return '';
+        }).join('');
+      } else {
+        console.log('[YouTube] no runs, using displayMessage:', item.snippet?.displayMessage);
+        // Fallback to displayMessage with shortcode parsing
+        text = parseYouTubeEmoji(escapeHtmlYT(item.snippet?.displayMessage || ''));
+      }
+      if (!text) continue;
       const badges = [];
       if (author.isChatOwner)     badges.push('owner');
       if (author.isChatModerator) badges.push('moderator');
