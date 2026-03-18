@@ -915,6 +915,11 @@ function connectJoystick() {
       if (msg.type === 'reject_subscription') { console.error('[Joystick] Subscription rejected — check credentials'); return; }
       const payload = msg.message;
       if (!payload) return;
+      if (payload.event === 'ChatMessage') {
+        if (payload.type !== 'new_message') {
+          console.log('[Joystick] Non-standard message type:', payload.type, JSON.stringify(payload).substring(0, 300));
+        }
+      }
       if (payload.event === 'ChatMessage' && payload.type === 'new_message') {
         const username = payload.author?.username || 'Unknown';
         const rawText = payload.text || '';
