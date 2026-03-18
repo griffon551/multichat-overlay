@@ -915,13 +915,7 @@ function connectJoystick() {
       if (msg.type === 'reject_subscription') { console.error('[Joystick] Subscription rejected — check credentials'); return; }
       const payload = msg.message;
       if (!payload) return;
-      if (payload.event === 'ChatMessage') {
-        if (payload.type !== 'new_message') {
-          console.log('[Joystick] Non-standard message type:', payload.type, JSON.stringify(payload).substring(0, 300));
-        }
-      }
       if (payload.event === 'ChatMessage' && payload.type === 'new_message') {
-        console.log('[Joystick] RAW:', JSON.stringify(payload).substring(0, 400));
         const username = payload.author?.username || 'Unknown';
         const rawText = payload.text || '';
         const color = payload.author?.usernameColor || null;
@@ -1102,6 +1096,21 @@ YOUTUBE_REFRESH_TOKEN=${data.refresh_token || '(not returned — keep existing)'
     youtubeReset('manual reset via webhook');
     res.json({ ok: true, status: 'reset' });
   });
+});
+
+// ─── Streamer.bot chat injection webhook ─────────────────────────────────────
+// POST /send-message with JSON body:
+// { "username": "BotName", "message": "Hello!", "platform": "joystick", "color": "#ff0000" }
+// platform defaults to "joystick", color is optional
+app.post('/send-message', express.json(), (req, res) => {
+  const { username, message, platform, color } = req.body || {};
+  if (!username || !message) {
+    return res.status(400).json({ ok: false, error: 'username and message are required' });
+  }
+  const plat = platform || 'joystick';
+  broadcast(plat, username, message, color || null, []);
+  console.log(`[Webhook] ${plat}/${username}: ${message}`);
+  res.json({ ok: true });
 });
 
 // ─── Status endpoint ─────────────────────────────────────────────────────────
