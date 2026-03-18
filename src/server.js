@@ -1099,11 +1099,10 @@ YOUTUBE_REFRESH_TOKEN=${data.refresh_token || '(not returned — keep existing)'
 });
 
 // ─── Streamer.bot chat injection webhook ─────────────────────────────────────
-// POST /send-message with JSON body:
-// { "username": "BotName", "message": "Hello!", "platform": "joystick", "color": "#ff0000" }
+// GET /send-message?username=BotName&message=Hello&platform=joystick&color=%23ff0000
 // platform defaults to "joystick", color is optional
-app.post('/send-message', express.json(), (req, res) => {
-  const { username, message, platform, color } = req.body || {};
+app.get('/send-message', (req, res) => {
+  const { username, message, platform, color } = req.query;
   if (!username || !message) {
     return res.status(400).json({ ok: false, error: 'username and message are required' });
   }
