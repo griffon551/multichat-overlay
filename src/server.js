@@ -921,6 +921,7 @@ function connectJoystick() {
         }
       }
       if (payload.event === 'ChatMessage' && payload.type === 'new_message') {
+        console.log('[Joystick] RAW:', JSON.stringify(payload).substring(0, 400));
         const username = payload.author?.username || 'Unknown';
         const rawText = payload.text || '';
         const color = payload.author?.usernameColor || null;
