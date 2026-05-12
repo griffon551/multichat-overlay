@@ -900,7 +900,7 @@ function connectJoystick() {
   }
 
   const basicKey = getJoystickBasicKey();
-  const ws = new WebSocket(`wss://joystick.tv/cable?token=${basicKey}`, 'actioncable-v1-json');
+  const ws = new WebSocket(`wss://api.joystick.tv/cable?token=${basicKey}`, 'actioncable-v1-json');
 
   ws.on('open', () => {
     console.log('[Joystick] Connected, subscribing to GatewayChannel...');
